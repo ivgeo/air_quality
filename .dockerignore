@@ -1,0 +1,3 @@
+# The application code is bind-mounted at runtime; the image only needs docker/.
+*
+!docker/
