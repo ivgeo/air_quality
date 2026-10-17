@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Support\LocalCalendar;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -20,6 +21,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        // The API docs (/docs/api) are public in every environment, so they can be reviewed anywhere.
+        Gate::define('viewApiDocs', fn (mixed $user = null): bool => true);
     }
 }

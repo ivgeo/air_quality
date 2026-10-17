@@ -20,4 +20,14 @@ enum Metric: string
             self::Pm10 => 'PM10',
         };
     }
+
+    /**
+     * The unit the metric's values are measured and stored in.
+     */
+    public function unit(): string
+    {
+        return match ($this) {
+            self::Pm25, self::Pm10 => 'µg/m³',
+        };
+    }
 }
