@@ -21,4 +21,12 @@ final readonly class DateRange
     {
         return (int) $this->from->startOfDay()->diff($this->to->startOfDay())->days + 1;
     }
+
+    /**
+     * @return array{from: string, to: string}
+     */
+    public function toDateStrings(): array
+    {
+        return ['from' => $this->from->toDateString(), 'to' => $this->to->toDateString()];
+    }
 }

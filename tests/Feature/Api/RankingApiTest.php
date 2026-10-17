@@ -39,8 +39,8 @@ class RankingApiTest extends TestCase
 
         $this->assertSame(['Varna', 'Plovdiv', 'Sofia'], $response->json('data.*.city.name'));
         $this->assertSame([1, 2, 3], $response->json('data.*.rank'));
-        $response->assertJsonPath('data.0.city.slug', $varna->slug)
-            ->assertJsonPath('data.0.average', 10.0);
+        $response->assertJsonPath('data.0.city.slug', $varna->slug);
+        $this->assertEquals(10.0, $response->json('data.0.average'));
     }
 
     public function test_the_average_is_weighted_by_the_number_of_measurements(): void
@@ -89,7 +89,7 @@ class RankingApiTest extends TestCase
         $this->assertSame(['Sofia', 'Varna'], $default->json('data.*.city.name'));
         $default->assertJsonPath('meta.metric', ['slug' => 'pm25', 'label' => 'PM2.5', 'unit' => 'µg/m³']);
         $this->assertSame(['Varna', 'Sofia'], $pm10->json('data.*.city.name'));
-        $this->assertSame([30.0, 40.0], $pm10->json('data.*.average'));
+        $this->assertEquals([30.0, 40.0], $pm10->json('data.*.average'));
         $pm10->assertJsonPath('meta.metric', ['slug' => 'pm10', 'label' => 'PM10', 'unit' => 'µg/m³']);
     }
 

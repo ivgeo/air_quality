@@ -75,7 +75,7 @@ class RankingRequest extends FormRequest
                 $stored = $this->storedPeriods->overall;
 
                 if ($stored === null) {
-                    $validator->errors()->add('metric', "No {$this->metric()->label()} data has been collected yet.");
+                    $validator->errors()->add('metric', "{$this->metric()->label()} data has not been collected yet.");
 
                     return;
                 }
