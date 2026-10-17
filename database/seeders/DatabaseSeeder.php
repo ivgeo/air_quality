@@ -10,10 +10,14 @@ class DatabaseSeeder extends Seeder
     use WithoutModelEvents;
 
     /**
-     * Seed the application's database.
+     * Seed the reference data (cities, providers, metrics); safe to run on every start.
      */
     public function run(): void
     {
-        //
+        $this->call([
+            CitySeeder::class,
+            DataProviderSeeder::class,
+            QualityMetricSeeder::class,
+        ]);
     }
 }
