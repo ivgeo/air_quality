@@ -1,58 +1,92 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Clean Air Finder
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A web service and minimal web UI that answers: *which Bulgarian city had the cleanest air
+(average PM2.5, µg/m³) over a given period?*
 
-## About Laravel
+> Work in progress: this README currently covers running the project. Architecture, data source,
+> assumptions and trade-offs will be documented as the features land.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Requirements
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- Docker with the Compose plugin (`docker compose`)
+- GNU make
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Nothing else is needed on the host: PHP, Composer and Artisan all run inside the containers.
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Quick start
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+make up
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+That single command builds the images and starts the stack. On the first run it also creates `.env`
+from `.env.example`, installs the Composer dependencies, generates `APP_KEY` and runs the
+migrations. It returns once every service is healthy, and it is safe to run again: an existing
+`.env` is never overwritten.
 
-## Contributing
+| What    | URL                   | Notes                                                       |
+|---------|-----------------------|-------------------------------------------------------------|
+| App     | http://localhost:8088 | `/up` is the framework health route                         |
+| Adminer | http://localhost:8089 | Local development only. Log in with server `mysql` and the `DB_USERNAME` / `DB_PASSWORD` from `.env` |
+| MySQL   | `127.0.0.1:33060`     | For an IDE / database client (same credentials)             |
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Stack
 
-## Code of Conduct
+| Service     | Image                         | Role                                                    |
+|-------------|-------------------------------|---------------------------------------------------------|
+| `app`       | `docker/php/Dockerfile` (PHP 8.5 FPM) | Laravel 13 application; bootstraps a fresh checkout |
+| `scheduler` | same image                    | `php artisan schedule:work` (scheduled data collection) |
+| `nginx`     | `nginx:1.30-alpine`           | HTTP entry point                                        |
+| `mysql`     | `mysql:8.4` (LTS)             | Development database `air_quality` and test database `air_quality_test` |
+| `adminer`   | `adminer:6`                   | Database UI, bound to localhost (not for production)    |
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+The PHP image is built with your host UID/GID (passed by the Makefile), so files created by the
+containers in the project directory stay owned by you.
 
-## Security Vulnerabilities
+## Make targets
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Run `make` (or `make help`) to list them. Extra arguments go through `ARGS="..."`.
 
-## License
+| Command        | What it does                                               |
+|----------------|------------------------------------------------------------|
+| `make up`      | Build and start everything, wait until healthy             |
+| `make down`    | Stop and remove the containers (data volumes are kept)     |
+| `make restart` | `down` + `up`                                              |
+| `make build`   | Rebuild the PHP image                                      |
+| `make ps`      | Service status and health                                  |
+| `make logs`    | Follow logs, e.g. `make logs ARGS="app scheduler"`         |
+| `make sh`      | Shell in the `app` container                               |
+| `make artisan` | Artisan, e.g. `make artisan ARGS="migrate:status"`         |
+| `make composer`| Composer, e.g. `make composer ARGS="show"`                 |
+| `make test`    | PHPUnit suite, e.g. `make test ARGS="--filter=SomeTest"`   |
+| `make mysql`   | MySQL client on the development database                   |
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Tests
+
+```bash
+make test
+```
+
+PHPUnit runs inside the `app` container against the separate MySQL database `air_quality_test`
+(configured in `phpunit.xml`), so the development data is never touched.
+
+The test database is created by `docker/mysql/init/01-create-test-database.sh`. MySQL only runs
+init scripts when its data volume is empty. If you already had a `mysql-data` volume from before
+that script existed, recreate it with `docker compose down -v && make up`. **This deletes all local
+database data.**
+
+## Configuration
+
+All settings live in `.env` (created from `.env.example` on the first run). If a host port is
+taken, change it there and run `make up` again:
+
+| Variable          | Default | Used for                |
+|-------------------|---------|-------------------------|
+| `APP_PORT`        | `8088`  | App (nginx)             |
+| `ADMINER_PORT`    | `8089`  | Adminer                 |
+| `FORWARD_DB_PORT` | `33060` | MySQL on the host       |
+
+If you change `APP_PORT`, update `APP_URL` too. The database credentials in `.env.example` are for
+local development only.
+
+Laravel logs go to `storage/logs/laravel.log` and to stderr, so they also show up in `make logs`.
