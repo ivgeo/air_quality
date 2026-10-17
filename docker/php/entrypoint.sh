@@ -40,6 +40,9 @@ bootstrap() {
         attempt=$((attempt + 1))
         sleep 3
     done
+
+    log "Seeding reference data"
+    php artisan db:seed --force --no-interaction
 }
 
 case "${CONTAINER_ROLE:-app}" in
