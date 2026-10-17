@@ -25,7 +25,11 @@ class IngestHourlyData implements ShouldBeUnique, ShouldQueue
      */
     public int $maxExceptions = 1;
 
-    public int $timeout = 120;
+    /**
+     * Covers the provider's worst case (3 attempts x (15 s + 5 s connect) + sleeps) and stays below
+     * the database queue's retry_after (90 s), so a slow job is never handed out twice.
+     */
+    public int $timeout = 80;
 
     /**
      * A job of the same type, provider and city waiting in the queue makes a new one redundant.

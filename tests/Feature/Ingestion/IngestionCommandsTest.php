@@ -36,7 +36,7 @@ class IngestionCommandsTest extends TestCase
         [$providers, $cities] = $this->activeAndInactive();
 
         $this->artisan('air-quality:ingest')
-            ->expectsOutputToContain('Queued 4 ingestion job(s)')
+            ->expectsOutputToContain('Dispatched 4 ingestion job(s)')
             ->assertSuccessful();
 
         Queue::assertPushed(IngestHourlyData::class, 4);
@@ -77,7 +77,7 @@ class IngestionCommandsTest extends TestCase
         $this->activeAndInactive();
 
         $this->artisan('air-quality:backfill', ['--days' => $days])
-            ->expectsOutputToContain('--days must be a positive whole number')
+            ->expectsOutputToContain('--days must be a whole number from 1 to 3650')
             ->assertFailed();
 
         Queue::assertNothingPushed();
@@ -90,6 +90,8 @@ class IngestionCommandsTest extends TestCase
             'negative' => ['-5'],
             'text' => ['many'],
             'fraction' => ['1.5'],
+            'too many' => ['3651'],
+            'overflow' => ['99999999999999999999'],
         ];
     }
 

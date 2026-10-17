@@ -16,5 +16,6 @@ class ScheduleTest extends TestCase
         $this->assertCount(1, $events);
         $this->assertSame('0 * * * *', $events->first()->expression);
         $this->assertTrue($events->first()->withoutOverlapping);
+        $this->assertSame(10, $events->first()->expiresAt);
     }
 }

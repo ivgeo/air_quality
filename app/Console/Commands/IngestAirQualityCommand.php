@@ -17,7 +17,7 @@ class IngestAirQualityCommand extends Command
 
         $count === 0
             ? $this->components->warn('No active provider and city to ingest.')
-            : $this->components->info("Queued {$count} ingestion job(s).");
+            : $this->components->info("Dispatched {$count} ingestion job(s); one already waiting for the same city is not duplicated.");
 
         return self::SUCCESS;
     }
