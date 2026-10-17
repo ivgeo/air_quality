@@ -111,7 +111,7 @@ class HourlySeriesValidatorTest extends TestCase
         $this->assertSame(0, $result->rejected);
     }
 
-    public function test_the_replaced_period_runs_from_the_first_to_the_last_accepted_hour(): void
+    public function test_accepted_hours_are_in_ascending_order(): void
     {
         $result = $this->validate([
             '2026-10-17 11:00' => ['pm25' => 3.0],
@@ -121,8 +121,27 @@ class HourlySeriesValidatorTest extends TestCase
         ]);
 
         $this->assertSame(['2026-10-17 09:00', '2026-10-17 11:00'], array_keys($this->hours($result)));
-        $this->assertSame('2026-10-17 09:00', $result->first()?->format('Y-m-d H:i'));
-        $this->assertSame('2026-10-17 11:00', $result->last()?->format('Y-m-d H:i'));
+    }
+
+    public function test_a_time_that_is_not_the_start_of_an_hour_is_rejected(): void
+    {
+        $result = $this->validate(['2026-10-17 09:30' => ['pm25' => 2.0], '2026-10-17 10:00' => ['pm25' => 3.0]]);
+
+        $this->assertSame(['2026-10-17 10:00' => ['pm25' => 3.0]], $this->hours($result));
+        $this->assertSame(1, $result->rejected);
+    }
+
+    public function test_a_repeated_hour_keeps_the_first_reading_and_rejects_the_rest(): void
+    {
+        $readings = [
+            new HourlyReading(CarbonImmutable::parse('2026-10-17 10:00', 'UTC'), ['pm25' => 3.0]),
+            new HourlyReading(CarbonImmutable::parse('2026-10-17 10:00', 'UTC'), ['pm25' => 9.0]),
+        ];
+
+        $result = (new HourlySeriesValidator)->validate(new HourlySeries($readings), $this->from, $this->to);
+
+        $this->assertSame(['2026-10-17 10:00' => ['pm25' => 3.0]], $this->hours($result));
+        $this->assertSame(1, $result->rejected);
     }
 
     public function test_an_empty_series_gives_an_empty_result(): void
@@ -130,7 +149,6 @@ class HourlySeriesValidatorTest extends TestCase
         $result = $this->validate([]);
 
         $this->assertTrue($result->isEmpty());
-        $this->assertNull($result->first());
         $this->assertSame(0, $result->rejected);
     }
 

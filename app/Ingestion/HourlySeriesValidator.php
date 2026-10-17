@@ -12,7 +12,8 @@ use Carbon\CarbonImmutable;
  * Value rules shared by every provider.
  *
  * A metric value that is missing, not a number, not finite or negative is dropped; an hour left
- * without any valid metric is rejected rather than stored as zero. Hours after the current one
+ * without any valid metric is rejected rather than stored as zero, and so is a time that is not
+ * the start of an hour or repeats an earlier one. Hours after the current one
  * (forecast) or outside the requested period are cut silently: they are not bad data.
  */
 class HourlySeriesValidator
@@ -33,7 +34,7 @@ class HourlySeriesValidator
 
             $measurements = $this->measurements($reading->values);
 
-            if ($measurements->isEmpty()) {
+            if ($measurements->isEmpty() || $timestamp % 3600 !== 0 || isset($hours[$timestamp])) {
                 $rejected++;
 
                 continue;

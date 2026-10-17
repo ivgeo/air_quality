@@ -17,14 +17,16 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Fetches one provider's hourly data for one city and replaces the stored hours of the period it
- * returned, journaling the attempt in `ingestion_runs`.
+ * Fetches one provider's hourly data for one city and upserts the valid hours, journaling the
+ * attempt in `ingestion_runs`.
  *
- * A failure never touches the stored rows: the run is marked failed with the reason instead.
+ * Stored data is never lost to a bad response: a failure leaves the rows untouched, a rejected or
+ * missing hour keeps its stored row, and a metric missing from a returned hour keeps its stored
+ * value (new values are merged into the stored JSON).
  */
 class HourlyIngestor
 {
-    private const INSERT_CHUNK = 500;
+    private const UPSERT_CHUNK = 500;
 
     public function __construct(
         private readonly ProviderRegistry $providers,
@@ -62,7 +64,7 @@ class HourlyIngestor
                 throw new ProviderException(sprintf('The provider returned no valid hours (%d rejected).', $series->rejected));
             }
 
-            $this->replace($provider, $city, $series);
+            $this->store($provider, $city, $series);
         } catch (ProviderNotConfiguredException $e) {
             Log::warning('Ingestion run skipped: provider is not configured', [...$context, 'error' => $e->getMessage()]);
 
@@ -74,7 +76,12 @@ class HourlyIngestor
         } catch (Throwable $e) {
             // Unexpected (e.g. database) errors are journaled too, then left to the queue to report.
             Log::error('Ingestion run failed unexpectedly', [...$context, 'error' => $e->getMessage()]);
-            $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
+
+            try {
+                $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
+            } catch (Throwable) {
+                // The database itself may be the problem; the original error matters more.
+            }
 
             throw $e;
         }
@@ -87,10 +94,10 @@ class HourlyIngestor
     }
 
     /**
-     * Delete the stored hours between the first and the last returned hour and insert the new ones,
-     * atomically, so readers never see the period half replaced.
+     * Insert the valid hours or merge them into the stored ones (unique city, provider, hour),
+     * atomically, so readers never see the period half written.
      */
-    private function replace(DataProvider $provider, City $city, ValidatedSeries $series): void
+    private function store(DataProvider $provider, City $city, ValidatedSeries $series): void
     {
         $rows = [];
 
@@ -103,15 +110,12 @@ class HourlyIngestor
             ];
         }
 
-        DB::transaction(function () use ($provider, $city, $series, $rows) {
-            AirQualityHourly::query()
-                ->where('city_id', $city->id)
-                ->where('data_provider_id', $provider->id)
-                ->whereBetween('measure_at', [$series->first()->toDateTimeString(), $series->last()->toDateTimeString()])
-                ->delete();
+        // VALUES() is the form Laravel's MySQL grammar uses for upserts without a row alias.
+        $merge = ['data' => DB::raw('JSON_MERGE_PATCH(`data`, VALUES(`data`))')];
 
-            foreach (array_chunk($rows, self::INSERT_CHUNK) as $chunk) {
-                AirQualityHourly::query()->insert($chunk);
+        DB::transaction(function () use ($rows, $merge) {
+            foreach (array_chunk($rows, self::UPSERT_CHUNK) as $chunk) {
+                AirQualityHourly::query()->toBase()->upsert($chunk, ['city_id', 'data_provider_id', 'measure_at'], $merge);
             }
         });
     }

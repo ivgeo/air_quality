@@ -102,35 +102,65 @@ class HourlyIngestorTest extends TestCase
     {
         $this->respond(['2026-10-17 10:00' => ['pm25' => 12.3, 'pm10' => 20.0]]);
         $this->ingest();
+        $id = AirQualityHourly::sole()->id;
 
-        $this->respond(['2026-10-17 10:00' => ['pm25' => 14.0]]);
+        $this->respond(['2026-10-17 10:00' => ['pm25' => 14.0, 'pm10' => 21.0]]);
         $this->ingest();
 
-        $this->assertSame(['2026-10-17 10:00:00' => ['pm25' => 14.0]], $this->stored());
+        $this->assertSame(['2026-10-17 10:00:00' => ['pm25' => 14.0, 'pm10' => 21.0]], $this->stored());
+        $this->assertSame($id, AirQualityHourly::sole()->id);
     }
 
-    public function test_rows_outside_the_returned_period_and_of_other_cities_or_providers_are_kept(): void
+    public function test_a_metric_missing_from_a_returned_hour_keeps_its_stored_value(): void
+    {
+        $this->respond(['2026-10-17 10:00' => ['pm25' => 12.3, 'pm10' => 20.0]]);
+        $this->ingest();
+
+        $this->respond(['2026-10-17 10:00' => ['pm25' => null, 'pm10' => 21.0]]);
+        $this->ingest();
+
+        $this->assertSame(['2026-10-17 10:00:00' => ['pm25' => 12.3, 'pm10' => 21.0]], $this->stored());
+    }
+
+    public function test_a_rejected_hour_keeps_its_stored_row(): void
+    {
+        $this->storeHour('2026-10-17 10:00', 1.0);
+        $this->respond(['2026-10-17 09:00' => ['pm25' => 2.0], '2026-10-17 10:00' => ['pm25' => null, 'pm10' => -3], '2026-10-17 11:00' => ['pm25' => 4.0]]);
+
+        $run = $this->ingest()->refresh();
+
+        $this->assertSame([
+            '2026-10-17 09:00:00' => ['pm25' => 2.0],
+            '2026-10-17 10:00:00' => ['pm25' => 1.0],
+            '2026-10-17 11:00:00' => ['pm25' => 4.0],
+        ], $this->stored());
+        $this->assertSame(1, $run->rows_rejected);
+    }
+
+    public function test_hours_the_provider_did_not_return_and_rows_of_other_cities_or_providers_are_kept(): void
     {
         $before = $this->storeHour('2026-10-17 09:00', 1.0);
         $after = $this->storeHour('2026-10-17 12:00', 2.0);
         $otherCity = $this->storeHour('2026-10-17 10:00', 3.0, city: City::factory()->create());
         $otherProvider = $this->storeHour('2026-10-17 10:00', 4.0, provider: DataProvider::factory()->create());
-        $inside = $this->storeHour('2026-10-17 10:30', 5.0);
+        $skipped = $this->storeHour('2026-10-17 11:00', 5.0);
 
-        $this->respond(['2026-10-17 10:00' => ['pm25' => 6.0], '2026-10-17 11:00' => ['pm25' => 7.0]]);
+        $this->respond(['2026-10-17 10:00' => ['pm25' => 6.0]]);
         $this->ingest();
 
         $this->assertModelExists($before);
         $this->assertModelExists($after);
         $this->assertModelExists($otherCity);
         $this->assertModelExists($otherProvider);
-        $this->assertModelMissing($inside);
+        $this->assertModelExists($skipped);
         $this->assertSame([
             '2026-10-17 09:00:00' => ['pm25' => 1.0],
             '2026-10-17 10:00:00' => ['pm25' => 6.0],
-            '2026-10-17 11:00:00' => ['pm25' => 7.0],
+            '2026-10-17 11:00:00' => ['pm25' => 5.0],
             '2026-10-17 12:00:00' => ['pm25' => 2.0],
         ], $this->stored());
+        $this->assertSame(['pm25' => 3.0], AirQualityHourly::where('city_id', '!=', $this->city->id)->sole()->data->toArray());
+        $this->assertSame(['pm25' => 4.0], AirQualityHourly::where('data_provider_id', '!=', $this->provider->id)->sole()->data->toArray());
     }
 
     public function test_a_provider_failure_keeps_the_stored_rows_and_fails_the_run(): void

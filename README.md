@@ -57,9 +57,10 @@ provider. The first provider is the [Open-Meteo Air Quality API](https://open-me
 
 Both commands only queue one job per active provider and active city (`data_provider` / `city`
 tables); the `queue` service runs them. The history is empty after the first `make up`, so run
-the backfill once. Both commands are safe to repeat: each job replaces the stored hours of the
-period the provider returned, inside a transaction. A slow, failing or invalid provider response
-leaves the stored data untouched. Every job leaves a row in `ingestion_runs` (outcome, rows
+the backfill once. Both commands are safe to repeat: each job upserts the valid hours it got, inside a transaction,
+on the unique key (city, provider, hour), merging new metric values into the stored ones. A slow,
+failing or invalid provider response leaves the stored data untouched, and so does a single hour
+or metric that comes back missing or invalid. Every job leaves a row in `ingestion_runs` (outcome, rows
 written and rejected, error, duration) and logs its start and end; follow them with
 `make logs ARGS="queue"`.
 

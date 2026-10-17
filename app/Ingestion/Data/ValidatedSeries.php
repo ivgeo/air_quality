@@ -3,12 +3,9 @@
 namespace App\Ingestion\Data;
 
 use App\Data\Measurements;
-use Carbon\CarbonImmutable;
 
 /**
  * The hours of a series that may be stored, plus how many returned hours were rejected.
- *
- * The stored period that these hours replace runs from the first to the last accepted hour.
  */
 final readonly class ValidatedSeries
 {
@@ -23,15 +20,5 @@ final readonly class ValidatedSeries
     public function isEmpty(): bool
     {
         return $this->hours === [];
-    }
-
-    public function first(): ?CarbonImmutable
-    {
-        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestamp(array_key_first($this->hours), 'UTC');
-    }
-
-    public function last(): ?CarbonImmutable
-    {
-        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestamp(array_key_last($this->hours), 'UTC');
     }
 }
