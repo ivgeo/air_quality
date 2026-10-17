@@ -656,6 +656,14 @@ th[aria-sort="descending"] .sort::after {
         padding-right: 16px;
     }
 
+    .topbar__inner {
+        gap: 4px;
+    }
+
+    .topbar__nav a {
+        padding: 11px 10px;
+    }
+
     .page {
         padding-top: 24px;
         gap: 20px;
