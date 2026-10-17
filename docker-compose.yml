@@ -1,0 +1,97 @@
+# Local development stack. Start everything with `make up` (see README.md).
+# Values come from .env; the defaults below mirror .env.example so a fresh checkout works too.
+
+x-php: &php
+  build:
+    context: .
+    dockerfile: docker/php/Dockerfile
+    args:
+      UID: ${HOST_UID:-1000}
+      GID: ${HOST_GID:-1000}
+  volumes:
+    - ./:/var/www/html
+    - composer-cache:/home/app/.cache/composer
+  restart: unless-stopped
+
+services:
+  app:
+    <<: *php
+    environment:
+      CONTAINER_ROLE: app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      # php-fpm only starts after the entrypoint bootstrap (composer install, migrations) is done.
+      test: ["CMD-SHELL", "SCRIPT_NAME=/ping SCRIPT_FILENAME=/ping REQUEST_METHOD=GET cgi-fcgi -bind -connect 127.0.0.1:9000 | grep -q pong"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 300s
+      start_interval: 2s
+
+  scheduler:
+    <<: *php
+    environment:
+      CONTAINER_ROLE: scheduler
+    depends_on:
+      app:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.30-alpine
+    ports:
+      - "${APP_PORT:-8088}:80"
+    volumes:
+      - ./:/var/www/html:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      # Laravel's built-in /up route: exercises nginx -> php-fpm -> framework boot.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/up || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-air_quality}
+      MYSQL_USER: ${DB_USERNAME:-air_quality}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+    ports:
+      - "127.0.0.1:${FORWARD_DB_PORT:-33060}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP on purpose: the temporary server used during first-time init listens on the socket only.
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -u root --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+      start_interval: 2s
+    restart: unless-stopped
+
+  # Development-only database UI, bound to localhost.
+  adminer:
+    image: adminer:6
+    environment:
+      ADMINER_DEFAULT_SERVER: mysql
+    ports:
+      - "127.0.0.1:${ADMINER_PORT:-8089}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  composer-cache:
