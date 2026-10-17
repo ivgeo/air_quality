@@ -41,7 +41,6 @@ class MeasurementsCast implements CastsAttributes
             throw new InvalidArgumentException(sprintf('The "%s" attribute expects %s, %s given.', $key, Measurements::class, get_debug_type($value)));
         }
 
-        // Cast to an object so that empty measurements are stored as {} rather than [].
-        return json_encode((object) $value->toArray(), JSON_THROW_ON_ERROR);
+        return $value->toJson();
     }
 }
