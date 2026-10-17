@@ -168,7 +168,7 @@ class HourlyIngestorTest extends TestCase
         $provider = DataProvider::factory()->create(['slug' => 'not-configured']);
         Log::spy();
 
-        $run = app(HourlyIngestor::class)->ingest($provider, $this->city, IngestionType::Backfill, now()->subDay(), now())->refresh();
+        $run = app(HourlyIngestor::class)->ingest($provider, $this->city, IngestionType::Backfill, CarbonImmutable::now()->subDay(), CarbonImmutable::now())->refresh();
 
         $this->assertSame(IngestionOutcome::Failed, $run->outcome);
         $this->assertSame(IngestionType::Backfill, $run->type);
