@@ -100,7 +100,7 @@
                 <div class="card">
                     <span class="card__label">Available data</span>
                     <span class="card__value card__value--small" id="card-stored-range"></span>
-                    <span class="card__hint" id="card-stored-days"></span>
+                    <span class="card__hint">Any period inside it can be ranked</span>
                 </div>
             </div>
 

@@ -245,6 +245,8 @@
 
     function showRanking(body) {
         if (body.data.length === 0) {
+            state.rows = [];
+            state.meta = null;
             showMessage(status, 'No data for this period.');
 
             return;
@@ -267,7 +269,6 @@
         document.getElementById('card-period-days').textContent = plural(meta.period.days, 'day');
         document.getElementById('card-period-range').textContent = formatRange(meta.period);
         document.getElementById('card-stored-range').textContent = formatRange(meta.stored);
-        document.getElementById('card-stored-days').textContent = 'Any period inside it can be ranked';
         document.getElementById('average-label').textContent = 'Average ' + meta.metric.label;
         document.getElementById('average-unit').textContent = meta.metric.unit;
 
