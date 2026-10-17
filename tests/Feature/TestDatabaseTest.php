@@ -24,6 +24,6 @@ class TestDatabaseTest extends TestCase
 
     public function test_migrations_are_applied_to_the_test_database(): void
     {
-        $this->assertTrue(Schema::hasTable('users'));
+        $this->assertTrue(Schema::hasTable('sessions'));
     }
 }
