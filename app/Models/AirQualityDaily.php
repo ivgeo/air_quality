@@ -19,7 +19,7 @@ class AirQualityDaily extends Model
     /** @use HasFactory<AirQualityDailyFactory> */
     use HasFactory;
 
-    const UPDATED_AT = null;
+    public const ?string UPDATED_AT = null;
 
     /**
      * @return BelongsTo<City, $this>

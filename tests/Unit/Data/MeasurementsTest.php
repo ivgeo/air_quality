@@ -56,6 +56,18 @@ class MeasurementsTest extends TestCase
         $this->assertTrue(Measurements::empty()->isEmpty());
     }
 
+    public function test_to_json_stores_empty_measurements_as_an_object(): void
+    {
+        $this->assertSame('{}', Measurements::empty()->toJson());
+    }
+
+    public function test_to_json_follows_the_metric_case_order(): void
+    {
+        $measurements = Measurements::fromArray(['pm10' => 20.1, 'pm25' => 12.3]);
+
+        $this->assertSame('{"pm25":12.3,"pm10":20.1}', $measurements->toJson());
+    }
+
     #[DataProvider('nonFiniteValues')]
     public function test_non_finite_values_are_rejected(float $value): void
     {

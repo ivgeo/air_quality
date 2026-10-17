@@ -1,8 +1,7 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+// Re-fetch the most recent days every hour; the jobs themselves never overlap per provider and city.
+// The command only queues jobs, so its mutex expires after 10 minutes rather than the default 24 hours.
+Schedule::command('air-quality:ingest')->hourly()->withoutOverlapping(10);

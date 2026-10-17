@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('quality_metric', function (Blueprint $table) {
+        Schema::create('quality_metric', function (Blueprint $table): void {
             $table->increments('id');
             $table->string('name', 32);
             // Matches a App\Enums\Metric value.

@@ -29,7 +29,7 @@ class QualityMetric extends Model
         'status' => 0,
     ];
 
-    const UPDATED_AT = null;
+    public const ?string UPDATED_AT = null;
 
     /**
      * @return HasMany<AirQualityDaily, $this>

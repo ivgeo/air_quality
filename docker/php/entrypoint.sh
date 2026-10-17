@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Container entrypoint shared by the "app" and "scheduler" services (selected by CONTAINER_ROLE).
+# Container entrypoint shared by the "app", "scheduler" and "queue" services (selected by CONTAINER_ROLE).
 # The app role bootstraps a fresh checkout idempotently, so `docker compose up` alone is enough.
 set -euo pipefail
 
@@ -55,8 +55,13 @@ case "${CONTAINER_ROLE:-app}" in
         log "Starting the scheduler"
         exec php artisan schedule:work
         ;;
+    queue)
+        log "Starting the queue worker"
+        # Jobs decide their own retries (retryUntil); --max-time restarts the worker hourly to pick up code changes.
+        exec php artisan queue:work --tries=1 --max-time=3600
+        ;;
     *)
-        log "Unknown CONTAINER_ROLE '${CONTAINER_ROLE}' (expected: app, scheduler)"
+        log "Unknown CONTAINER_ROLE '${CONTAINER_ROLE}' (expected: app, scheduler, queue)"
         exit 1
         ;;
 esac

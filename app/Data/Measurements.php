@@ -79,6 +79,7 @@ final readonly class Measurements
      */
     public function toArray(): array
     {
+        /** @var array<string, float> $result */
         $result = [];
 
         foreach (Metric::cases() as $metric) {
@@ -88,5 +89,13 @@ final readonly class Measurements
         }
 
         return $result;
+    }
+
+    /**
+     * The stored JSON shape; empty measurements become {} rather than [].
+     */
+    public function toJson(): string
+    {
+        return json_encode((object) $this->toArray(), JSON_THROW_ON_ERROR);
     }
 }

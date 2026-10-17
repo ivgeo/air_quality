@@ -16,7 +16,7 @@ class CitySeeder extends Seeder
     /**
      * City centre coordinates (WGS84), keyed by slug.
      */
-    private const CITIES = [
+    private const array CITIES = [
         'sofia' => ['name' => 'Sofia', 'latitude' => 42.69751, 'longitude' => 23.32415],
         'plovdiv' => ['name' => 'Plovdiv', 'latitude' => 42.14354, 'longitude' => 24.74966],
         'varna' => ['name' => 'Varna', 'latitude' => 43.21405, 'longitude' => 27.91473],

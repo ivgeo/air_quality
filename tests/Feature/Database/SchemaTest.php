@@ -23,7 +23,7 @@ class SchemaTest extends TestCase
 
     public function test_the_application_tables_exist_and_the_user_tables_are_gone(): void
     {
-        foreach (['city', 'data_provider', 'quality_metric', 'air_quality_hourly', 'air_quality_daily', 'sessions', 'cache', 'jobs'] as $table) {
+        foreach (['city', 'data_provider', 'quality_metric', 'air_quality_hourly', 'air_quality_daily', 'ingestion_runs', 'sessions', 'cache', 'jobs'] as $table) {
             $this->assertTrue(Schema::hasTable($table), "Table {$table} is missing.");
         }
 
@@ -58,13 +58,24 @@ class SchemaTest extends TestCase
         ];
     }
 
+    public function test_ingestion_runs_has_the_index_for_the_last_run_per_provider_and_city(): void
+    {
+        $this->assertSame(
+            ['data_provider_id', 'city_id', 'outcome', 'finished_at'],
+            $this->indexColumns('ingestion_runs', 'idx_ingestion_runs_provider_city_outcome_finished'),
+        );
+    }
+
     public function test_foreign_keys_reuse_leading_index_columns_instead_of_own_indexes(): void
     {
         $this->assertNotContains(['city_id'], $this->allIndexColumns('air_quality_hourly'));
         $this->assertNotContains(['city_id'], $this->allIndexColumns('air_quality_daily'));
         $this->assertNotContains(['metric_id'], $this->allIndexColumns('air_quality_daily'));
 
+        $this->assertNotContains(['data_provider_id'], $this->allIndexColumns('ingestion_runs'));
+
         $this->assertSame(['data_provider_id'], $this->indexColumns('air_quality_hourly', 'idx_air_quality_hourly_data_provider'));
+        $this->assertSame(['city_id'], $this->indexColumns('ingestion_runs', 'idx_ingestion_runs_city'));
     }
 
     public function test_foreign_keys_point_to_the_reference_tables(): void
@@ -76,6 +87,10 @@ class SchemaTest extends TestCase
         $this->assertEqualsCanonicalizing(
             ['city_id' => 'city', 'metric_id' => 'quality_metric'],
             $this->foreignTables('air_quality_daily'),
+        );
+        $this->assertEqualsCanonicalizing(
+            ['city_id' => 'city', 'data_provider_id' => 'data_provider'],
+            $this->foreignTables('ingestion_runs'),
         );
     }
 
@@ -161,7 +176,8 @@ class SchemaTest extends TestCase
      */
     private function index(string $table, string $name): array
     {
-        $index = Arr::first(Schema::getIndexes($table), fn (array $index) => $index['name'] === $name);
+        /** @var array{name: string, columns: list<string>, unique: bool}|null $index */
+        $index = Arr::first(Schema::getIndexes($table), fn (array $index): bool => $index['name'] === $name);
         $this->assertNotNull($index, "Index {$name} is missing on {$table}.");
 
         return $index;
@@ -189,7 +205,7 @@ class SchemaTest extends TestCase
     private function foreignTables(string $table): array
     {
         return collect(Schema::getForeignKeys($table))
-            ->mapWithKeys(fn (array $key) => [implode(',', $key['columns']) => $key['foreign_table']])
+            ->mapWithKeys(fn (array $key): array => [implode(',', $key['columns']) => $key['foreign_table']])
             ->all();
     }
 }
