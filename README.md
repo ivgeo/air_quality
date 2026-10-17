@@ -36,12 +36,36 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 |-------------|-------------------------------|---------------------------------------------------------|
 | `app`       | `docker/php/Dockerfile` (PHP 8.5 FPM) | Laravel 13 application; bootstraps a fresh checkout |
 | `scheduler` | same image                    | `php artisan schedule:work` (scheduled data collection) |
+| `queue`     | same image                    | `php artisan queue:work` (runs the ingestion jobs)      |
 | `nginx`     | `nginx:1.30-alpine`           | HTTP entry point                                        |
 | `mysql`     | `mysql:8.4` (LTS)             | Development database `air_quality` and test database `air_quality_test` |
 | `adminer`   | `adminer:6`                   | Database UI, bound to localhost (not for production)    |
 
 The PHP image is built with your host UID/GID (passed by the Makefile), so files created by the
 containers in the project directory stay owned by you.
+
+## Data collection
+
+Air quality data is collected in the background and stored locally; a user request never calls the
+provider. The first provider is the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api)
+(CAMS Europe model, PM2.5 and PM10, hourly, UTC).
+
+| Command                                         | What it does                                                    |
+|-------------------------------------------------|-----------------------------------------------------------------|
+| `make artisan ARGS="air-quality:backfill"`      | Fill the history (default 186 days, `--days=N` to change)       |
+| `make artisan ARGS="air-quality:ingest"`        | Re-fetch the last 3 days; the scheduler runs this every hour    |
+
+Both commands only queue one job per active provider and active city (`data_provider` / `city`
+tables); the `queue` service runs them. The history is empty after the first `make up`, so run
+the backfill once. Both commands are safe to repeat: each job replaces the stored hours of the
+period the provider returned, inside a transaction. A slow, failing or invalid provider response
+leaves the stored data untouched. Every job leaves a row in `ingestion_runs` (outcome, rows
+written and rejected, error, duration) and logs its start and end; follow them with
+`make logs ARGS="queue"`.
+
+Providers are configured in `config/air_quality.php` (class, URL, timeouts, retries), keyed by
+`data_provider.slug`. Adding a provider means a class implementing
+`App\Ingestion\Contracts\AirQualityProvider`, a config entry and a `data_provider` row.
 
 ## Make targets
 
@@ -54,7 +78,7 @@ Run `make` (or `make help`) to list them. Extra arguments go through `ARGS="..."
 | `make restart` | `down` + `up`                                              |
 | `make build`   | Rebuild the PHP image                                      |
 | `make ps`      | Service status and health                                  |
-| `make logs`    | Follow logs, e.g. `make logs ARGS="app scheduler"`         |
+| `make logs`    | Follow logs, e.g. `make logs ARGS="app queue"`             |
 | `make sh`      | Shell in the `app` container                               |
 | `make artisan` | Artisan, e.g. `make artisan ARGS="migrate:status"`         |
 | `make composer`| Composer, e.g. `make composer ARGS="show"`                 |
@@ -85,6 +109,8 @@ taken, change it there and run `make up` again:
 | `APP_PORT`        | `8088`  | App (nginx)             |
 | `ADMINER_PORT`    | `8089`  | Adminer                 |
 | `FORWARD_DB_PORT` | `33060` | MySQL on the host       |
+| `OPEN_METEO_URL`  | `https://air-quality-api.open-meteo.com` | Open-Meteo API base URL |
+| `OPEN_METEO_TIMEOUT` | `15` | Open-Meteo request timeout (seconds) |
 
 If you change `APP_PORT`, update `APP_URL` too. The database credentials in `.env.example` are for
 local development only.
