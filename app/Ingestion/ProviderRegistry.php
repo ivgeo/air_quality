@@ -22,12 +22,14 @@ class ProviderRegistry
      */
     public function for(string $slug): AirQualityProvider
     {
+        /** @var mixed $entry */
         $entry = $this->config->get('air_quality.providers')[$slug] ?? null;
 
         if (! is_array($entry)) {
             throw ProviderNotConfiguredException::missing($slug);
         }
 
+        /** @var mixed $class */
         $class = $entry['class'] ?? null;
 
         if (! is_string($class) || ! is_subclass_of($class, AirQualityProvider::class)) {

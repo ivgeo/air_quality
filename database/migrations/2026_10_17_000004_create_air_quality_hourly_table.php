@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('air_quality_hourly', function (Blueprint $table) {
+        Schema::create('air_quality_hourly', function (Blueprint $table): void {
             $table->increments('id');
             $table->unsignedInteger('city_id');
             $table->unsignedInteger('data_provider_id');

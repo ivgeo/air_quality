@@ -7,6 +7,7 @@ use App\Jobs\IngestHourlyData;
 use App\Models\City;
 use App\Models\DataProvider;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Decides WHICH ingestion runs happen: one job per active provider and active city. How a provider
@@ -37,6 +38,7 @@ class IngestionDispatcher
         // The current hour is included; the validator drops anything the provider has not measured yet.
         $to = CarbonImmutable::now('UTC')->startOfHour();
         $from = $to->subDays($days);
+        /** @var Collection<int, City> $cities */
         $cities = City::query()->where('is_active', true)->orderBy('id')->get();
         $count = 0;
 

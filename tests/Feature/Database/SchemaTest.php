@@ -176,7 +176,8 @@ class SchemaTest extends TestCase
      */
     private function index(string $table, string $name): array
     {
-        $index = Arr::first(Schema::getIndexes($table), fn (array $index) => $index['name'] === $name);
+        /** @var array{name: string, columns: list<string>, unique: bool}|null $index */
+        $index = Arr::first(Schema::getIndexes($table), fn (array $index): bool => $index['name'] === $name);
         $this->assertNotNull($index, "Index {$name} is missing on {$table}.");
 
         return $index;
@@ -204,7 +205,7 @@ class SchemaTest extends TestCase
     private function foreignTables(string $table): array
     {
         return collect(Schema::getForeignKeys($table))
-            ->mapWithKeys(fn (array $key) => [implode(',', $key['columns']) => $key['foreign_table']])
+            ->mapWithKeys(fn (array $key): array => [implode(',', $key['columns']) => $key['foreign_table']])
             ->all();
     }
 }

@@ -12,6 +12,7 @@ use App\Models\City;
 use App\Models\DataProvider;
 use App\Models\IngestionRun;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Expression;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -26,7 +27,7 @@ use Throwable;
  */
 class HourlyIngestor
 {
-    private const UPSERT_CHUNK = 500;
+    private const int UPSERT_CHUNK = 500;
 
     public function __construct(
         private readonly ProviderRegistry $providers,
@@ -55,6 +56,7 @@ class HourlyIngestor
         ]);
 
         Log::info('Ingestion run started', $context);
+        /** @var ValidatedSeries|null $series */
         $series = null;
 
         try {
@@ -99,6 +101,7 @@ class HourlyIngestor
      */
     private function store(DataProvider $provider, City $city, ValidatedSeries $series): void
     {
+        /** @var list<array{city_id: int, data_provider_id: int, measure_at: string, data: string}> $rows */
         $rows = [];
 
         foreach ($series->hours as $timestamp => $measurements) {
@@ -111,9 +114,10 @@ class HourlyIngestor
         }
 
         // VALUES() is the form Laravel's MySQL grammar uses for upserts without a row alias.
+        /** @var array<string, Expression> $merge */
         $merge = ['data' => DB::raw('JSON_MERGE_PATCH(`data`, VALUES(`data`))')];
 
-        DB::transaction(function () use ($rows, $merge) {
+        DB::transaction(function () use ($rows, $merge): void {
             foreach (array_chunk($rows, self::UPSERT_CHUNK) as $chunk) {
                 AirQualityHourly::query()->toBase()->upsert($chunk, ['city_id', 'data_provider_id', 'measure_at'], $merge);
             }

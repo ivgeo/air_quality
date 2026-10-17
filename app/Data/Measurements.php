@@ -79,6 +79,7 @@ final readonly class Measurements
      */
     public function toArray(): array
     {
+        /** @var array<string, float> $result */
         $result = [];
 
         foreach (Metric::cases() as $metric) {

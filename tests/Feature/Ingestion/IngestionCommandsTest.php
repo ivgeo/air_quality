@@ -11,6 +11,7 @@ use App\Models\City;
 use App\Models\DataProvider;
 use App\Models\IngestionRun;
 use Carbon\CarbonImmutable;
+use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -41,7 +42,7 @@ class IngestionCommandsTest extends TestCase
 
         Queue::assertPushed(IngestHourlyData::class, 4);
         $this->assertPushedPairs($providers, $cities);
-        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job) => $job->type === IngestionType::Scheduled
+        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job): bool => $job->type === IngestionType::Scheduled
             && $job->from->toDateTimeString() === '2026-10-14 12:00:00'
             && $job->to->toDateTimeString() === '2026-10-17 12:00:00');
     }
@@ -55,7 +56,7 @@ class IngestionCommandsTest extends TestCase
 
         Queue::assertPushed(IngestHourlyData::class, 4);
         $this->assertPushedPairs($providers, $cities);
-        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job) => $job->type === IngestionType::Backfill
+        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job): bool => $job->type === IngestionType::Backfill
             && $job->from->toDateTimeString() === '2026-04-14 12:00:00'
             && $job->to->toDateTimeString() === '2026-10-17 12:00:00');
     }
@@ -67,7 +68,7 @@ class IngestionCommandsTest extends TestCase
 
         $this->artisan('air-quality:backfill', ['--days' => 10])->assertSuccessful();
 
-        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job) => $job->from->toDateTimeString() === '2026-10-07 12:00:00');
+        Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job): bool => $job->from->toDateTimeString() === '2026-10-07 12:00:00');
     }
 
     #[TestWith('invalidDays')]
@@ -101,7 +102,7 @@ class IngestionCommandsTest extends TestCase
         DataProvider::factory()->create(['slug' => 'open-meteo']);
         $failing = City::factory()->create(['latitude' => 41.11111]);
         $others = City::factory()->count(2)->create(['latitude' => 43.22222]);
-        Http::fake(fn (Request $request) => str_contains($request->url(), 'latitude=41.11111')
+        Http::fake(fn (Request $request): PromiseInterface => str_contains($request->url(), 'latitude=41.11111')
             ? Http::response('Internal error', 500)
             : Http::response($this->openMeteoBody()));
 
@@ -140,7 +141,7 @@ class IngestionCommandsTest extends TestCase
     {
         foreach ($providers as $provider) {
             foreach ($cities as $city) {
-                Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job) => $job->provider->is($provider) && $job->city->is($city));
+                Queue::assertPushed(IngestHourlyData::class, fn (IngestHourlyData $job): bool => $job->provider->is($provider) && $job->city->is($city));
             }
         }
     }

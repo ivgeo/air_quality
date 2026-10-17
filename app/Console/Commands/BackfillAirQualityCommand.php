@@ -11,7 +11,7 @@ use Illuminate\Console\Command;
 #[Description('Queue the fetch of the hourly history for every active provider and city; safe to repeat')]
 class BackfillAirQualityCommand extends Command
 {
-    private const MAX_DAYS = 3650;
+    private const int MAX_DAYS = 3650;
 
     public function handle(IngestionDispatcher $dispatcher): int
     {

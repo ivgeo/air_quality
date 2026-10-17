@@ -23,6 +23,7 @@ class MeasurementsCast implements CastsAttributes
             return null;
         }
 
+        /** @var mixed $data */
         $data = json_decode($value, true, flags: JSON_THROW_ON_ERROR);
 
         if (! is_array($data)) {

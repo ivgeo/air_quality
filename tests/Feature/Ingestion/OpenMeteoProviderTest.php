@@ -15,7 +15,7 @@ use Tests\TestCase;
 
 class OpenMeteoProviderTest extends TestCase
 {
-    private const FROM = 1792224000; // 2026-10-17 08:00 UTC
+    private const int FROM = 1792224000; // 2026-10-17 08:00 UTC
 
     protected function setUp(): void
     {
@@ -31,7 +31,9 @@ class OpenMeteoProviderTest extends TestCase
         $this->fetch();
 
         Http::assertSentCount(1);
-        Http::assertSent(function (Request $request) {
+        Http::assertSent(function (Request $request): bool {
+            /** @var array<string, string> $query */
+            $query = [];
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
             return str_starts_with($request->url(), 'https://air-quality-api.open-meteo.com/v1/air-quality?')

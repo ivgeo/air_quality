@@ -166,7 +166,7 @@ class HourlyIngestorTest extends TestCase
     public function test_a_provider_failure_keeps_the_stored_rows_and_fails_the_run(): void
     {
         $this->storeHour('2026-10-17 10:00', 1.0);
-        $this->respond(fn () => throw new ProviderException('Open-Meteo responded with HTTP 502.'));
+        $this->respond(fn (): never => throw new ProviderException('Open-Meteo responded with HTTP 502.'));
         Log::spy();
 
         $run = $this->ingest()->refresh();
@@ -177,7 +177,7 @@ class HourlyIngestorTest extends TestCase
         $this->assertSame(0, $run->rows_written);
         $this->assertNotNull($run->finished_at);
         $this->assertNotNull($run->duration_ms);
-        Log::shouldHaveReceived('error')->once()->withArgs(fn (string $message, array $context) => $context['error'] === 'Open-Meteo responded with HTTP 502.' && $context['city'] === $this->city->slug);
+        Log::shouldHaveReceived('error')->once()->withArgs(fn (string $message, array $context): bool => $context['error'] === 'Open-Meteo responded with HTTP 502.' && $context['city'] === $this->city->slug);
     }
 
     public function test_a_response_without_any_valid_hour_deletes_nothing_and_fails_the_run(): void
@@ -203,7 +203,7 @@ class HourlyIngestorTest extends TestCase
         $this->assertSame(IngestionOutcome::Failed, $run->outcome);
         $this->assertSame(IngestionType::Backfill, $run->type);
         $this->assertStringContainsString('"not-configured"', $run->error);
-        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context) => $context['provider'] === 'not-configured');
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context): bool => $context['provider'] === 'not-configured');
         Log::shouldNotHaveReceived('error');
     }
 
@@ -212,8 +212,8 @@ class HourlyIngestorTest extends TestCase
      */
     private function respond(array|Closure $hours): void
     {
-        $handler = $hours instanceof Closure ? $hours : fn () => new HourlySeries(array_map(
-            fn (string $hour, array $values) => new HourlyReading(CarbonImmutable::parse($hour, 'UTC'), $values),
+        $handler = $hours instanceof Closure ? $hours : fn (): HourlySeries => new HourlySeries(array_map(
+            fn (string $hour, array $values): HourlyReading => new HourlyReading(CarbonImmutable::parse($hour, 'UTC'), $values),
             array_keys($hours),
             $hours,
         ));
@@ -251,7 +251,7 @@ class HourlyIngestorTest extends TestCase
             ->where('data_provider_id', $this->provider->id)
             ->orderBy('measure_at')
             ->get()
-            ->mapWithKeys(fn (AirQualityHourly $row) => [$row->measure_at->toDateTimeString() => $row->data->toArray()])
+            ->mapWithKeys(fn (AirQualityHourly $row): array => [$row->measure_at->toDateTimeString() => $row->data->toArray()])
             ->all();
     }
 }

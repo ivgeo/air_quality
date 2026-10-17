@@ -22,6 +22,7 @@ class HourlySeriesValidator
     {
         $first = $from->getTimestamp();
         $last = min($to->getTimestamp(), CarbonImmutable::now()->startOfHour()->getTimestamp());
+        /** @var array<int, Measurements> $hours */
         $hours = [];
         $rejected = 0;
 

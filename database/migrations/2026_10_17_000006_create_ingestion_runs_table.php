@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('ingestion_runs', function (Blueprint $table) {
+        Schema::create('ingestion_runs', function (Blueprint $table): void {
             $table->bigIncrements('id');
             $table->unsignedInteger('data_provider_id');
             $table->unsignedInteger('city_id');

@@ -15,7 +15,7 @@ class DataProviderSeeder extends Seeder
     /**
      * Provider names, keyed by slug.
      */
-    private const PROVIDERS = [
+    private const array PROVIDERS = [
         'open-meteo' => 'Open-Meteo',
     ];
 

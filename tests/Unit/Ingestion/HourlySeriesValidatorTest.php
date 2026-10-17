@@ -157,6 +157,7 @@ class HourlySeriesValidatorTest extends TestCase
      */
     private function validate(array $hours, ?CarbonImmutable $to = null): ValidatedSeries
     {
+        /** @var list<HourlyReading> $readings */
         $readings = [];
 
         foreach ($hours as $hour => $values) {
@@ -171,6 +172,7 @@ class HourlySeriesValidatorTest extends TestCase
      */
     private function hours(ValidatedSeries $result): array
     {
+        /** @var array<string, array<string, float>> $hours */
         $hours = [];
 
         foreach ($result->hours as $timestamp => $measurements) {

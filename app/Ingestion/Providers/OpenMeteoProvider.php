@@ -25,12 +25,12 @@ class OpenMeteoProvider implements AirQualityProvider
     /**
      * Open-Meteo variable => App\Enums\Metric.
      */
-    private const VARIABLES = [
+    private const array VARIABLES = [
         'pm2_5' => Metric::Pm25,
         'pm10' => Metric::Pm10,
     ];
 
-    private const UNIT = 'μg/m³';
+    private const string UNIT = 'μg/m³';
 
     /**
      * @param  array{url: string, domain: string, timeout: int, connect_timeout: int, retries: int, retry_sleep_ms: int}  $config
@@ -66,7 +66,7 @@ class OpenMeteoProvider implements AirQualityProvider
                 ->retry(
                     $this->config['retries'] + 1,
                     $this->config['retry_sleep_ms'],
-                    fn (Throwable $e) => $e instanceof ConnectionException || ($e instanceof RequestException && $this->isTransient($e->response)),
+                    fn (Throwable $e): bool => $e instanceof ConnectionException || ($e instanceof RequestException && $this->isTransient($e->response)),
                     throw: false,
                 )
                 ->get('/v1/air-quality', $query);
@@ -75,6 +75,7 @@ class OpenMeteoProvider implements AirQualityProvider
         }
 
         if ($response->failed()) {
+            /** @var mixed $reason */
             $reason = $response->json('reason');
 
             throw new ProviderException(sprintf('Open-Meteo responded with HTTP %d%s', $response->status(), is_string($reason) ? ': '.$reason : '.'));
@@ -90,6 +91,7 @@ class OpenMeteoProvider implements AirQualityProvider
 
     private function parse(Response $response): HourlySeries
     {
+        /** @var mixed $body untrusted decoded JSON, checked below */
         $body = $response->json();
 
         if (! is_array($body)) {
@@ -100,12 +102,14 @@ class OpenMeteoProvider implements AirQualityProvider
             throw new ProviderException('Open-Meteo returned an error: '.($body['reason'] ?? 'no reason given'));
         }
 
+        /** @var mixed $hourly */
         $hourly = $body['hourly'] ?? null;
 
         if (! is_array($hourly)) {
             throw new ProviderException('Open-Meteo response has no "hourly" block.');
         }
 
+        /** @var mixed $times */
         $times = $hourly['time'] ?? null;
 
         if (! is_array($times) || ! array_is_list($times)) {
@@ -119,12 +123,14 @@ class OpenMeteoProvider implements AirQualityProvider
         }
 
         foreach (array_keys(self::VARIABLES) as $variable) {
+            /** @var mixed $values */
             $values = $hourly[$variable] ?? null;
 
             if (! is_array($values) || ! array_is_list($values) || count($values) !== count($times)) {
                 throw new ProviderException(sprintf('Open-Meteo "%s" values are missing or do not match the %d hours.', $variable, count($times)));
             }
 
+            /** @var mixed $unit */
             $unit = $body['hourly_units'][$variable] ?? null;
 
             if ($unit !== self::UNIT) {
@@ -132,9 +138,11 @@ class OpenMeteoProvider implements AirQualityProvider
             }
         }
 
+        /** @var list<HourlyReading> $readings */
         $readings = [];
 
         foreach ($times as $index => $time) {
+            /** @var array<string, mixed> $values */
             $values = [];
 
             foreach (self::VARIABLES as $variable => $metric) {
