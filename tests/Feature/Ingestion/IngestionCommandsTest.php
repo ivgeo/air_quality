@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Ingestion;
 
+use App\Data\StatusFlags;
 use App\Enums\IngestionOutcome;
 use App\Enums\IngestionType;
 use App\Jobs\IngestHourlyData;
@@ -120,7 +121,7 @@ class IngestionCommandsTest extends TestCase
      */
     private function activeAndInactive(): array
     {
-        DataProvider::factory()->create(['status' => 0]);
+        DataProvider::factory()->create(['status' => StatusFlags::of()]);
         City::factory()->inactive()->create();
 
         return [
