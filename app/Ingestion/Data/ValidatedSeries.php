@@ -27,11 +27,11 @@ final readonly class ValidatedSeries
 
     public function first(): ?CarbonImmutable
     {
-        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestampUTC(array_key_first($this->hours));
+        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestamp(array_key_first($this->hours), 'UTC');
     }
 
     public function last(): ?CarbonImmutable
     {
-        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestampUTC(array_key_last($this->hours));
+        return $this->isEmpty() ? null : CarbonImmutable::createFromTimestamp(array_key_last($this->hours), 'UTC');
     }
 }
