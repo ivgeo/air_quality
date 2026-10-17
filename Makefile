@@ -7,8 +7,9 @@
 COMPOSE := HOST_UID=$(shell id -u) HOST_GID=$(shell id -g) docker compose
 ARGS ?=
 
-# Read a value from .env, falling back to a default (.env does not exist before the first `make up`).
-env_value = $(or $(shell sed -n 's/^$(1)=//p' .env 2>/dev/null),$(2))
+# Resolve a setting like Compose does: shell environment first, then .env, then a default
+# (.env does not exist before the first `make up`).
+env_value = $(or $($(1)),$(shell sed -n 's/^$(1)=//p' .env 2>/dev/null | tail -n 1 | tr -d '"\r'),$(2))
 
 .PHONY: help up down restart build ps logs sh artisan composer test mysql
 

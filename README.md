@@ -88,5 +88,8 @@ taken, change it there and run `make up` again:
 
 If you change `APP_PORT`, update `APP_URL` too. The database credentials in `.env.example` are for
 local development only.
+MySQL applies `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` and `DB_ROOT_PASSWORD` only when it
+initialises an empty data volume, so changing them later also requires recreating the volume (see
+[Tests](#tests)).
 
 Laravel logs go to `storage/logs/laravel.log` and to stderr, so they also show up in `make logs`.
