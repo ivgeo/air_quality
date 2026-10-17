@@ -38,6 +38,15 @@ services:
       app:
         condition: service_healthy
 
+  # Runs the queued ingestion jobs (database queue).
+  queue:
+    <<: *php
+    environment:
+      CONTAINER_ROLE: queue
+    depends_on:
+      app:
+        condition: service_healthy
+
   nginx:
     image: nginx:1.30-alpine
     ports:
