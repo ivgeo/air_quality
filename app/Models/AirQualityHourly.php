@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\MeasurementsCast;
 use Database\Factories\AirQualityHourlyFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -46,6 +47,7 @@ class AirQualityHourly extends Model
     {
         return [
             'measure_at' => 'immutable_datetime',
+            'data' => MeasurementsCast::class,
         ];
     }
 }

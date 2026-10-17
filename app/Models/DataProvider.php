@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\StatusCast;
 use Database\Factories\DataProviderFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -34,6 +35,7 @@ class DataProvider extends Model
     protected function casts(): array
     {
         return [
+            'status' => StatusCast::class,
             'is_active' => 'boolean',
         ];
     }

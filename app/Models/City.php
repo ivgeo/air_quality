@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\StatusCast;
 use Database\Factories\CityFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
@@ -42,6 +43,7 @@ class City extends Model
         return [
             'latitude' => 'float',
             'longitude' => 'float',
+            'status' => StatusCast::class,
             'is_active' => 'boolean',
         ];
     }
