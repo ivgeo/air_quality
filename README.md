@@ -27,6 +27,7 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 | What    | URL                   | Notes                                                       |
 |---------|-----------------------|-------------------------------------------------------------|
 | App     | http://localhost:8088 | `/up` is the framework health route                         |
+| API docs | http://localhost:8088/docs/api | OpenAPI 3.1, see [API](#api)                     |
 | Adminer | http://localhost:8089 | Local development only. Log in with server `mysql` and the `DB_USERNAME` / `DB_PASSWORD` from `.env` |
 | MySQL   | `127.0.0.1:33060`     | For an IDE / database client (same credentials)             |
 
@@ -117,6 +118,76 @@ Invalid dates, `--from` after `--to` or an unknown city fail with an error and c
 - Full `air-quality:aggregate`: 935 city-days, 1 870 daily rows in ≈9.4 s (≈1.9 s per city,
   ≈10 ms per day, mostly the commit of each day's transaction). The hourly job only recomputes
   the last 4 days of one city (a few dozen ms).
+
+## API
+
+Interactive docs: http://localhost:8088/docs/api (OpenAPI 3.1 spec at
+http://localhost:8088/docs/api.json, generated from the code by
+[Scramble](https://scramble.dedoc.co/) and public in every environment).
+
+### `GET /api/v1/ranking`
+
+Ranks the active cities by the average of a metric over a period, from the cleanest to the most
+polluted. The answer to *which city had the cleanest air* is `data[0]`.
+
+| Parameter | Required | Format       | Meaning                                                          |
+|-----------|----------|--------------|------------------------------------------------------------------|
+| `from`    | yes      | `YYYY-MM-DD` | First day of the period, inclusive                               |
+| `to`      | yes      | `YYYY-MM-DD` | Last day of the period, inclusive; `from = to` is a single day   |
+| `metric`  | no       | `pm25`, `pm10` | Metric to rank by; `pm25` by default; only active metrics      |
+
+```bash
+curl 'http://localhost:8088/api/v1/ranking?from=2026-07-01&to=2026-07-31'
+```
+
+```json
+{
+    "data": [
+        {
+            "rank": 1,
+            "city": { "slug": "varna", "name": "Varna" },
+            "average": 6.27,
+            "measurements": 744,
+            "days_with_data": 31,
+            "stored": { "from": "2026-04-14", "to": "2026-10-17" }
+        }
+    ],
+    "meta": {
+        "period": { "from": "2026-07-01", "to": "2026-07-31", "days": 31 },
+        "metric": { "slug": "pm25", "label": "PM2.5", "unit": "µg/m³" },
+        "stored": { "from": "2026-04-14", "to": "2026-10-17" }
+    }
+}
+```
+
+(the other four cities are left out above).
+
+- **Days** are `Europe/Sofia` calendar days, like the daily aggregates; "today" is today in
+  Sofia and is allowed once it has data (it then covers the hours collected so far).
+- **Average** is `SUM(metric_sum) / SUM(metric_count)` over the days of the period, i.e. weighted
+  by the number of hourly measurements, not an average of daily averages. It is ordered on the
+  exact value and rounded to 2 decimals in the response; equal averages are ordered by city name.
+- **Coverage**: per city, `measurements` (hourly values) and `days_with_data` in the period, and
+  `stored`, the first and last day the city has data for. A city whose data starts later than
+  `from` (or ends earlier than `to`) still takes part with the days it has.
+- **Which cities**: active cities with at least one measurement in the period. A period inside
+  the stored range where no city has data returns `200` with an empty `data`.
+- **Stored period** (`meta.stored`) is read from the data: from the earliest to the latest day any
+  active city has daily data for the metric.
+- The response is built from `air_quality_daily` only, with a fixed number of queries for any
+  period length; the provider is never called, so the API keeps serving when it is down.
+
+Errors are `422` with the standard Laravel body `{"message": "...", "errors": {"<field>": ["..."]}}`
+and no partial result:
+
+| Case                                                     | Field            |
+|----------------------------------------------------------|------------------|
+| `from` / `to` missing, not `YYYY-MM-DD` or impossible (`2026-02-30`) | `from` / `to` |
+| `from` after `to`                                        | `from`           |
+| A date in the future (Sofia time)                        | `from` / `to`    |
+| A date before or after the stored period; the message names it, e.g. *The from date must be within the stored period 2026-04-14 – 2026-10-17.* | `from` / `to` |
+| Unknown or inactive metric                               | `metric`         |
+| No data collected yet for the metric (e.g. before the first backfill) | `metric` |
 
 ## Make targets
 
