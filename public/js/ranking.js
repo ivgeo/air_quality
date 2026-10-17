@@ -19,12 +19,27 @@
     const toInput = document.getElementById('to');
     const periodButtons = Array.from(document.querySelectorAll('[data-days]'));
     const metricButtons = Array.from(document.querySelectorAll('[data-metric]'));
+    const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
+    const themeToggle = document.getElementById('theme-toggle');
+    const status = document.getElementById('status');
+    const alert = document.getElementById('alert');
     const result = document.getElementById('result');
     const tbody = document.getElementById('ranking-body');
+    const fieldErrors = {
+        from: { input: fromInput, error: document.getElementById('from-error') },
+        to: { input: toInput, error: document.getElementById('to-error') },
+        metric: { input: null, error: document.getElementById('metric-error') },
+    };
+
+    const FAILURE = 'Could not load the ranking. Try again.';
 
     const state = {
         metric: app.dataset.defaultMetric,
         request: null,
+        rows: [],
+        meta: null,
+        // The API order is the ranking itself: sorting by `#` ascending shows it unchanged.
+        sort: { key: 'rank', dir: 'asc' },
     };
 
     // ---- Pure helpers ------------------------------------------------------------------------
@@ -41,12 +56,13 @@
         return { from: addDays(end, -(days - 1)), to: end };
     }
 
-    const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+    /** Y-m-d as "17 Oct 2026". */
     function formatDate(date) {
         const [year, month, day] = date.split('-').map(Number);
 
-        return dateFormat.format(new Date(Date.UTC(year, month - 1, day)));
+        return day + ' ' + MONTHS[month - 1] + ' ' + year;
     }
 
     function formatRange(range) {
@@ -59,6 +75,30 @@
 
     function plural(count, word) {
         return count + ' ' + word + (count === 1 ? '' : 's');
+    }
+
+    const comparators = {
+        rank: function (a, b) {
+            return a.rank - b.rank;
+        },
+        city: function (a, b) {
+            return a.city.name.localeCompare(b.city.name, 'en');
+        },
+        average: function (a, b) {
+            return a.average - b.average;
+        },
+        coverage: function (a, b) {
+            return a.days_with_data - b.days_with_data || a.measurements - b.measurements;
+        },
+    };
+
+    /** A sorted copy of the rows; ties keep the ranking order whatever the direction. */
+    function sortRows(rows, sort) {
+        const direction = sort.dir === 'asc' ? 1 : -1;
+
+        return rows.slice().sort(function (a, b) {
+            return direction * comparators[sort.key](a, b) || a.rank - b.rank;
+        });
     }
 
     function element(tag, className, text) {
@@ -109,6 +149,7 @@
 
         const request = new AbortController();
         state.request = request;
+        showLoading();
 
         const params = new URLSearchParams({ from: fromInput.value, to: toInput.value });
 
@@ -127,17 +168,91 @@
                     return;
                 }
 
-                state.request = null;
+                finish();
 
-                if (response.status === 200) {
-                    render(response.body);
+                if (response.status === 200 && Array.isArray(response.body.data)) {
+                    showRanking(response.body);
+                } else if (response.status === 422 && response.body.errors) {
+                    showValidationErrors(response.body);
+                } else {
+                    showMessage(alert, FAILURE);
                 }
             })
             .catch(function (error) {
-                if (error.name === 'AbortError') {
+                // A network error, an invalid JSON body or a newer request aborting this one.
+                if (error.name === 'AbortError' || request !== state.request) {
                     return;
                 }
+
+                finish();
+                showMessage(alert, FAILURE);
             });
+    }
+
+    function finish() {
+        state.request = null;
+        app.removeAttribute('aria-busy');
+        status.hidden = true;
+    }
+
+    // ---- States ------------------------------------------------------------------------------
+
+    /** Hides the previous result and errors, so nothing stale looks current while loading. */
+    function showLoading() {
+        clearErrors();
+        result.hidden = true;
+        app.setAttribute('aria-busy', 'true');
+        showMessage(status, 'Loading…');
+    }
+
+    function showMessage(target, text) {
+        target.textContent = text;
+        target.hidden = false;
+    }
+
+    function clearErrors() {
+        alert.hidden = true;
+        Object.keys(fieldErrors).forEach(function (field) {
+            const entry = fieldErrors[field];
+            entry.error.hidden = true;
+            entry.error.textContent = '';
+
+            if (entry.input) {
+                entry.input.removeAttribute('aria-invalid');
+                entry.input.removeAttribute('aria-describedby');
+            }
+        });
+    }
+
+    /** Shows each API validation error at its field, and the summary above the result. */
+    function showValidationErrors(body) {
+        Object.keys(body.errors).forEach(function (field) {
+            const entry = fieldErrors[field];
+
+            if (!entry) {
+                return;
+            }
+
+            showMessage(entry.error, body.errors[field].join(' '));
+
+            if (entry.input) {
+                entry.input.setAttribute('aria-invalid', 'true');
+                entry.input.setAttribute('aria-describedby', entry.error.id);
+            }
+        });
+        showMessage(alert, body.message || FAILURE);
+    }
+
+    function showRanking(body) {
+        if (body.data.length === 0) {
+            showMessage(status, 'No data for this period.');
+
+            return;
+        }
+
+        state.rows = body.data;
+        state.meta = body.meta;
+        render(body);
     }
 
     // ---- Rendering ---------------------------------------------------------------------------
@@ -156,10 +271,21 @@
         document.getElementById('average-label').textContent = 'Average ' + meta.metric.label;
         document.getElementById('average-unit').textContent = meta.metric.unit;
 
-        tbody.replaceChildren.apply(tbody, body.data.map(function (row) {
-            return renderRow(row, meta);
-        }));
+        renderTable();
         result.hidden = false;
+    }
+
+    function renderTable() {
+        tbody.replaceChildren.apply(tbody, sortRows(state.rows, state.sort).map(function (row) {
+            return renderRow(row, state.meta);
+        }));
+        sortButtons.forEach(function (button) {
+            const active = button.dataset.sort === state.sort.key;
+            button.closest('th').setAttribute(
+                'aria-sort',
+                active ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none',
+            );
+        });
     }
 
     function renderRow(row, meta) {
@@ -200,7 +326,47 @@
         return cell;
     }
 
+    // ---- Theme -------------------------------------------------------------------------------
+
+    const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+    function currentTheme() {
+        return document.documentElement.dataset.theme || (darkScheme.matches ? 'dark' : 'light');
+    }
+
+    function updateThemeToggle() {
+        themeToggle.setAttribute('aria-label', 'Switch to ' + (currentTheme() === 'dark' ? 'light' : 'dark') + ' theme');
+    }
+
+    function toggleTheme() {
+        const theme = currentTheme() === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = theme;
+
+        try {
+            localStorage.setItem('theme', theme);
+        } catch (e) {
+            // Storage blocked (e.g. a private window): the choice lasts until the page is reloaded.
+        }
+
+        updateThemeToggle();
+    }
+
     // ---- Events ------------------------------------------------------------------------------
+
+    themeToggle.addEventListener('click', toggleTheme);
+    darkScheme.addEventListener('change', updateThemeToggle);
+
+    sortButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            const key = button.dataset.sort;
+            const dir = key === state.sort.key
+                ? (state.sort.dir === 'asc' ? 'desc' : 'asc')
+                : (key === 'coverage' ? 'desc' : 'asc');
+
+            state.sort = { key: key, dir: dir };
+            renderTable();
+        });
+    });
 
     periodButtons.forEach(function (button) {
         button.addEventListener('click', function () {
@@ -235,5 +401,6 @@
         return button.dataset.days === String(DEFAULT_DAYS);
     }));
     selectMetric(state.metric);
+    updateThemeToggle();
     load();
 }());

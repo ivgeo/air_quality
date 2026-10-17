@@ -537,6 +537,23 @@ th[aria-sort="descending"] .sort {
     color: var(--accent);
 }
 
+/* Sort direction: ↕ when the column is not sorted, ↑ ascending, ↓ descending. */
+.sort::after {
+    content: '\2195';
+    font-size: 12px;
+    opacity: 0.6;
+}
+
+th[aria-sort="ascending"] .sort::after {
+    content: '\2191';
+    opacity: 1;
+}
+
+th[aria-sort="descending"] .sort::after {
+    content: '\2193';
+    opacity: 1;
+}
+
 .sort__label {
     display: flex;
     flex-direction: column;
