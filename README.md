@@ -36,7 +36,7 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 |-------------|-------------------------------|---------------------------------------------------------|
 | `app`       | `docker/php/Dockerfile` (PHP 8.5 FPM) | Laravel 13 application; bootstraps a fresh checkout |
 | `scheduler` | same image                    | `php artisan schedule:work` (scheduled data collection) |
-| `queue`     | same image                    | `php artisan queue:work` (runs the ingestion jobs)      |
+| `queue`     | same image                    | `php artisan queue:work` (ingestion and aggregation jobs) |
 | `nginx`     | `nginx:1.30-alpine`           | HTTP entry point                                        |
 | `mysql`     | `mysql:8.4` (LTS)             | Development database `air_quality` and test database `air_quality_test` |
 | `adminer`   | `adminer:6`                   | Database UI, bound to localhost (not for production)    |
@@ -67,6 +67,52 @@ written and rejected, error, duration) and logs its start and end; follow them w
 Providers are configured in `config/air_quality.php` (class, URL, timeouts, retries), keyed by
 `data_provider.slug`. Adding a provider means a class implementing
 `App\Ingestion\Contracts\AirQualityProvider`, a config entry and a `data_provider` row.
+
+## Daily aggregation
+
+Queries read pre-aggregated days, not hours. `air_quality_daily` holds, per city, calendar day and
+metric, the **sum and count** of the stored hourly values of **all providers together** (an
+average would not combine exactly over a period). An hour without a value for a metric is not
+counted for it, so `metric_count` is the number of real values, not 24.
+
+- **Calendar day**: hours are stored in UTC, a day runs from local midnight to local midnight in
+  `Europe/Sofia` (`air_quality.timezone`, read only by `App\Support\LocalCalendar`). So 22:00 UTC
+  in winter and 21:00 UTC in summer already belong to the next day, and the DST switch days have 23
+  and 25 hours. The day bounds are computed in PHP, so MySQL needs no timezone tables.
+- **When**: every successful ingestion run (scheduled refresh or backfill) queues an
+  `AggregateDailyData` job for its city and the local days of its period; a failed run queues
+  nothing and changes nothing. Jobs of the same city never overlap. So after the backfill the
+  daily table fills by itself.
+- **How**: each day is recomputed in full, in one transaction: delete the city's rows for the day,
+  then one `INSERT … SELECT … GROUP BY` over the day's hourly rows, with the JSON paths built from
+  the `Metric` enum. Running it again gives the same rows, a day that lost its hourly data loses its
+  daily rows, and readers see either the old or the new day, never half of it. Statuses are not
+  read: whatever was collected is aggregated, so deactivating a provider, city or metric needs no
+  recomputation.
+- **Failures**: an error rolls back only that day; the hourly data is never touched. A failed job
+  is retried by the queue and then logged as `Daily aggregation failed` (city, period, error); the
+  day keeps its previous rows until the next hourly run (which covers the last days again) or a
+  manual recomputation. Start and end of every aggregation are logged with days, rows and duration.
+
+Full recomputation, synchronous (not queued):
+
+| Command                                                              | What it does                                |
+|----------------------------------------------------------------------|---------------------------------------------|
+| `make artisan ARGS="air-quality:aggregate"`                          | Every city, from the first to the last stored day (hourly or daily) |
+| `make artisan ARGS="air-quality:aggregate --from=2026-07-01 --to=2026-07-31"` | Only these local days (`Y-m-d`); a missing end comes from the stored data |
+| `make artisan ARGS="air-quality:aggregate --city=sofia"`             | Only one city (inactive ones included); combines with `--from` / `--to` |
+
+Invalid dates, `--from` after `--to` or an unknown city fail with an error and change nothing.
+
+**Measured** on the development database (MySQL 8.4 in Docker on WSL2, 22 330 hourly rows,
+5 cities, 1 provider, 187 days):
+
+- One city-day: `EXPLAIN ANALYZE` of the `SELECT` part shows an index lookup on
+  `unq_city_provider_measure` (`city_id`, with an index condition on `measure_at`), no full scan:
+  24 rows × 2 metrics in ≈0.65 ms.
+- Full `air-quality:aggregate`: 935 city-days, 1 870 daily rows in ≈9.4 s (≈1.9 s per city,
+  ≈10 ms per day, mostly the commit of each day's transaction). The hourly job only recomputes
+  the last 4 days of one city (a few dozen ms).
 
 ## Make targets
 
