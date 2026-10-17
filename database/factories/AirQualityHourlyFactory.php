@@ -15,6 +15,11 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 class AirQualityHourlyFactory extends Factory
 {
     /**
+     * Gives consecutive rows distinct hours, so the (city, provider, hour) unique key does not collide.
+     */
+    private static int $sequence = 0;
+
+    /**
      * Define the model's default state.
      *
      * @return array<string, mixed>
@@ -24,7 +29,7 @@ class AirQualityHourlyFactory extends Factory
         return [
             'city_id' => City::factory(),
             'data_provider_id' => DataProvider::factory(),
-            'measure_at' => now('UTC')->subHours(fake()->numberBetween(1, 24 * 180))->startOfHour(),
+            'measure_at' => now('UTC')->startOfHour()->subHours(self::$sequence++ % (24 * 180) + 1),
             'data' => Measurements::empty()
                 ->with(Metric::Pm25, fake()->randomFloat(2, 0, 80))
                 ->with(Metric::Pm10, fake()->randomFloat(2, 0, 120)),

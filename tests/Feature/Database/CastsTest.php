@@ -6,8 +6,11 @@ use App\Data\Measurements;
 use App\Data\StatusFlags;
 use App\Enums\Metric;
 use App\Enums\Status;
+use App\Models\AirQualityDaily;
 use App\Models\AirQualityHourly;
 use App\Models\City;
+use App\Models\DataProvider;
+use App\Models\QualityMetric;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -92,12 +95,28 @@ class CastsTest extends TestCase
         $this->assertStoredStatus($city, 1, 1);
     }
 
+    public function test_a_new_model_without_status_is_inactive(): void
+    {
+        $this->assertSame(0, (new City)->status->value);
+    }
+
     public function test_assigning_a_raw_status_value_is_rejected(): void
     {
         $this->expectException(InvalidArgumentException::class);
 
         $city = new City;
         $city->status = 1;
+    }
+
+    public function test_factories_create_rows_without_unique_key_collisions(): void
+    {
+        $city = City::factory()->create();
+
+        AirQualityHourly::factory()->count(50)->for($city)->create(['data_provider_id' => DataProvider::factory()->create()->id]);
+        AirQualityDaily::factory()->count(50)->for($city)->create(['metric_id' => QualityMetric::factory()->create()->id]);
+
+        $this->assertSame(50, $city->hourly()->count());
+        $this->assertSame(50, $city->daily()->count());
     }
 
     private function assertStoredStatus(City $city, int $status, int $isActive): void

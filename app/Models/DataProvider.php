@@ -20,6 +20,15 @@ class DataProvider extends Model
     use HasFactory;
 
     /**
+     * The status column defaults to 0 in the database; mirror it so a new model always casts to StatusFlags.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => 0,
+    ];
+
+    /**
      * @return HasMany<AirQualityHourly, $this>
      */
     public function hourly(): HasMany
