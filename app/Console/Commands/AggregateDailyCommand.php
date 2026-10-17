@@ -53,11 +53,15 @@ class AggregateDailyCommand extends Command
             return self::SUCCESS;
         }
 
+        $days = 0;
         $rows = 0;
 
         try {
             foreach ($cities as $city) {
-                $rows += $aggregator->aggregate($city, CarbonImmutable::parse($from), CarbonImmutable::parse($to))->rowsWritten;
+                $result = $aggregator->aggregate($city, CarbonImmutable::parse($from), CarbonImmutable::parse($to));
+                // The same period for every city.
+                $days = $result->days;
+                $rows += $result->rowsWritten;
             }
         } catch (Throwable $e) {
             Log::error('Daily aggregation failed', ['city' => $city->slug, 'from' => $from, 'to' => $to, 'error' => $e->getMessage()]);
@@ -66,7 +70,6 @@ class AggregateDailyCommand extends Command
             return self::FAILURE;
         }
 
-        $days = (int) CarbonImmutable::parse($from)->diffInDays(CarbonImmutable::parse($to)) + 1;
         $this->components->info(sprintf('Aggregated %d city(ies) over %d day(s) (%s to %s): %d daily row(s) written.', $cities->count(), $days, $from, $to, $rows));
 
         return self::SUCCESS;
@@ -121,7 +124,9 @@ class AggregateDailyCommand extends Command
     private function storedRange(Collection $cities, LocalCalendar $calendar): ?array
     {
         $ids = $cities->modelKeys();
+        /** @var object{first: string|null, last: string|null} $hourly */
         $hourly = AirQualityHourly::query()->whereIn('city_id', $ids)->toBase()->selectRaw('MIN(measure_at) AS first, MAX(measure_at) AS last')->first();
+        /** @var object{first: string|null, last: string|null} $daily */
         $daily = AirQualityDaily::query()->whereIn('city_id', $ids)->toBase()->selectRaw('MIN(date) AS first, MAX(date) AS last')->first();
         /** @var list<string> $dates */
         $dates = [];

@@ -92,7 +92,8 @@ counted for it, so `metric_count` is the number of real values, not 24.
 - **Failures**: an error rolls back only that day; the hourly data is never touched. A failed job
   is retried by the queue and then logged as `Daily aggregation failed` (city, period, error); the
   day keeps its previous rows until the next hourly run (which covers the last days again) or a
-  manual recomputation. Start and end of every aggregation are logged with days, rows and duration.
+  manual recomputation (after a failed backfill aggregation, run `air-quality:aggregate` for the
+  older days). Start and end of every aggregation are logged with days, rows and duration.
 
 Full recomputation, synchronous (not queued):
 
@@ -108,8 +109,11 @@ Invalid dates, `--from` after `--to` or an unknown city fail with an error and c
 5 cities, 1 provider, 187 days):
 
 - One city-day: `EXPLAIN ANALYZE` of the `SELECT` part shows an index lookup on
-  `unq_city_provider_measure` (`city_id`, with an index condition on `measure_at`), no full scan:
-  24 rows × 2 metrics in ≈0.65 ms.
+  `unq_city_provider_measure` by `city_id` with an index condition on `measure_at`, no table scan:
+  24 rows × 2 metrics in ≈0.65 ms. The condition is checked inside the index, but on every index
+  entry of the city, so this grows with the history per city. An index on
+  `(city_id, measure_at)` (or `data_provider_id IN (…)` to use the whole unique key) would make it
+  a pure range read; not needed at this size.
 - Full `air-quality:aggregate`: 935 city-days, 1 870 daily rows in ≈9.4 s (≈1.9 s per city,
   ≈10 ms per day, mostly the commit of each day's transaction). The hourly job only recomputes
   the last 4 days of one city (a few dozen ms).
