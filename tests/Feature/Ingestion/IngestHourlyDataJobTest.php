@@ -2,13 +2,23 @@
 
 namespace Tests\Feature\Ingestion;
 
+use App\Enums\IngestionOutcome;
 use App\Enums\IngestionType;
+use App\Ingestion\Data\HourlyReading;
+use App\Ingestion\Data\HourlySeries;
+use App\Ingestion\Exceptions\ProviderException;
+use App\Jobs\AggregateDailyData;
 use App\Jobs\IngestHourlyData;
+use App\Models\AirQualityDaily;
 use App\Models\City;
 use App\Models\DataProvider;
+use App\Models\IngestionRun;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Queue;
+use Tests\Fakes\FakeAirQualityProvider;
 use Tests\TestCase;
 
 class IngestHourlyDataJobTest extends TestCase
@@ -23,7 +33,8 @@ class IngestHourlyDataJobTest extends TestCase
     {
         parent::setUp();
 
-        $this->provider = DataProvider::factory()->create();
+        CarbonImmutable::setTestNow('2026-10-17 12:34:56');
+        $this->provider = DataProvider::factory()->create(['slug' => 'fake']);
         $this->city = City::factory()->create();
     }
 
@@ -49,6 +60,37 @@ class IngestHourlyDataJobTest extends TestCase
 
         $this->assertSame("scheduled:{$scheduled->provider->id}:{$scheduled->city->id}", $scheduled->uniqueId());
         $this->assertNotSame($scheduled->uniqueId(), $backfill->uniqueId());
+    }
+
+    public function test_a_successful_run_queues_the_aggregation_of_its_period(): void
+    {
+        Queue::fake([AggregateDailyData::class]);
+        $this->respond(fn (): HourlySeries => new HourlySeries([new HourlyReading(CarbonImmutable::parse('2026-10-17 10:00', 'UTC'), ['pm25' => 12.3])]));
+
+        IngestHourlyData::dispatch($this->provider, $this->city, IngestionType::Scheduled, CarbonImmutable::parse('2026-10-14 12:00'), CarbonImmutable::parse('2026-10-17 12:00'));
+
+        $this->assertSame(IngestionOutcome::Success, IngestionRun::sole()->outcome);
+        Queue::assertPushed(AggregateDailyData::class, 1);
+        Queue::assertPushed(AggregateDailyData::class, fn (AggregateDailyData $job): bool => $job->city->is($this->city)
+            && $job->from->toDateTimeString() === '2026-10-14 12:00:00'
+            && $job->to->toDateTimeString() === '2026-10-17 12:00:00');
+    }
+
+    public function test_a_failed_run_does_not_queue_the_aggregation(): void
+    {
+        Queue::fake([AggregateDailyData::class]);
+        $this->respond(fn (): never => throw new ProviderException('Open-Meteo responded with HTTP 502.'));
+
+        IngestHourlyData::dispatch($this->provider, $this->city, IngestionType::Scheduled, CarbonImmutable::parse('2026-10-14 12:00'), CarbonImmutable::parse('2026-10-17 12:00'));
+
+        $this->assertSame(IngestionOutcome::Failed, IngestionRun::sole()->outcome);
+        Queue::assertNotPushed(AggregateDailyData::class);
+        $this->assertSame(0, AirQualityDaily::count());
+    }
+
+    private function respond(Closure $handler): void
+    {
+        config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class, 'handler' => $handler]]);
     }
 
     private function job(IngestionType $type): IngestHourlyData
