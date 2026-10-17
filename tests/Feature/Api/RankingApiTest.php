@@ -93,6 +93,15 @@ class RankingApiTest extends TestCase
         $pm10->assertJsonPath('meta.metric', ['slug' => 'pm10', 'label' => 'PM10', 'unit' => 'µg/m³']);
     }
 
+    public function test_an_empty_metric_falls_back_to_pm25(): void
+    {
+        $this->daily($this->city('Sofia'), '2026-07-01', 10.0, 1);
+
+        $this->getJson('/api/v1/ranking?from=2026-07-01&to=2026-07-01&metric=')
+            ->assertOk()
+            ->assertJsonPath('meta.metric.slug', 'pm25');
+    }
+
     public function test_an_inactive_city_is_left_out_and_does_not_widen_the_stored_period(): void
     {
         $this->daily($this->city('Sofia'), '2026-07-01', 10.0, 1);

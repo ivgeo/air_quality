@@ -76,6 +76,12 @@ class CityRanking
         /** @var list<RankingEntry> $entries */
         $entries = [];
         foreach ($cities as $city) {
+            // A city whose first daily row was written after the stored periods were read is left
+            // out, so the ranking stays consistent with the validated stored period.
+            if (! isset($stored->byCity[$city->id])) {
+                continue;
+            }
+
             $entries[] = new RankingEntry(
                 rank: count($entries) + 1,
                 city: $city,

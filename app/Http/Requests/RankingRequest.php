@@ -32,34 +32,18 @@ class RankingRequest extends FormRequest
         $notInFuture = $this->notAfter($calendar->today()->toDateString());
 
         return [
-            /** First day of the period (Y-m-d, Europe/Sofia), inclusive. */
-            'from' => ['bail', 'required', 'date_format:Y-m-d', $notInFuture, 'before_or_equal:to'],
-            /** Last day of the period (Y-m-d, Europe/Sofia), inclusive; on or after `from`. */
+            /** First day of the period (Y-m-d, Europe/Sofia), inclusive; on or before `to`. */
+            'from' => ['bail', 'required', 'date_format:Y-m-d', $notInFuture],
+            /** Last day of the period (Y-m-d, Europe/Sofia), inclusive. */
             'to' => ['bail', 'required', 'date_format:Y-m-d', $notInFuture],
-            /** Metric to rank by; `pm25` when omitted. */
-            'metric' => [
-                'bail',
-                'sometimes',
-                'string',
-                Rule::enum(Metric::class),
-                Rule::exists('quality_metric', 'slug')->where('is_active', 1),
-            ],
+            /** Metric to rank by; `pm25` when omitted or empty. Only active metrics are accepted. */
+            'metric' => ['bail', 'sometimes', 'nullable', 'string', Rule::enum(Metric::class)],
         ];
     }
 
     /**
-     * @return array<string, string>
-     */
-    public function messages(): array
-    {
-        return [
-            'from.before_or_equal' => 'The from date must be on or before the to date.',
-            'metric.exists' => 'The selected metric is not available.',
-        ];
-    }
-
-    /**
-     * Once the input is well formed, check the period against the days that have stored data.
+     * Once the input is well formed: the order of the dates, the metric being active (the default
+     * one included) and the period against the days that have stored data.
      *
      * @return list<Closure(Validator): void>
      */
@@ -71,7 +55,26 @@ class RankingRequest extends FormRequest
                     return;
                 }
 
-                $this->storedPeriods = $ranking->storedPeriods($this->qualityMetric());
+                $period = $this->period();
+
+                if ($period->from->gt($period->to)) {
+                    $validator->errors()->add('from', 'The from date must be on or before the to date.');
+
+                    return;
+                }
+
+                $this->qualityMetric = QualityMetric::query()
+                    ->where('slug', $this->metric()->value)
+                    ->where('is_active', 1)
+                    ->first();
+
+                if ($this->qualityMetric === null) {
+                    $validator->errors()->add('metric', 'The selected metric is not available.');
+
+                    return;
+                }
+
+                $this->storedPeriods = $ranking->storedPeriods($this->qualityMetric);
                 $stored = $this->storedPeriods->overall;
 
                 if ($stored === null) {
@@ -80,7 +83,6 @@ class RankingRequest extends FormRequest
                     return;
                 }
 
-                $period = $this->period();
                 $available = "{$stored->from->toDateString()} – {$stored->to->toDateString()}";
 
                 if ($period->from->lt($stored->from)) {
@@ -99,9 +101,12 @@ class RankingRequest extends FormRequest
         return $this->enum('metric', Metric::class) ?? Metric::Pm25;
     }
 
+    /**
+     * The active metric loaded while validating.
+     */
     public function qualityMetric(): QualityMetric
     {
-        return $this->qualityMetric ??= QualityMetric::query()->where('slug', $this->metric()->value)->firstOrFail();
+        return $this->qualityMetric ?? throw new LogicException('The request has not been validated yet.');
     }
 
     public function period(): DateRange

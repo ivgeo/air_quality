@@ -109,6 +109,37 @@ class RankingValidationTest extends TestCase
             ->assertJsonValidationErrors(['metric']);
     }
 
+    public function test_the_default_metric_is_rejected_when_it_is_inactive(): void
+    {
+        QualityMetric::where('slug', Metric::Pm25->value)->firstOrFail()->update(['status' => StatusFlags::of()]);
+
+        $this->ranking(['from' => '2026-07-01', 'to' => '2026-07-05'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['metric' => 'not available']);
+    }
+
+    /**
+     * @return array<string, array{array<string, string>}>
+     */
+    public static function invalidTo(): array
+    {
+        return [
+            'missing to' => [['from' => '2026-07-01']],
+            'malformed to' => [['from' => '2026-07-01', 'to' => 'abc']],
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $query
+     */
+    #[DataProvider('invalidTo')]
+    public function test_an_invalid_to_does_not_add_an_error_to_a_valid_from(array $query): void
+    {
+        $response = $this->ranking($query)->assertUnprocessable();
+
+        $this->assertSame(['to'], array_keys($response->json('errors')));
+    }
+
     public function test_a_metric_without_collected_data_says_so(): void
     {
         $this->ranking(['from' => '2026-07-01', 'to' => '2026-07-05', 'metric' => 'pm10'])

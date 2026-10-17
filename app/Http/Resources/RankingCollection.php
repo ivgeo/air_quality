@@ -11,6 +11,11 @@ use Illuminate\Http\Resources\Json\ResourceCollection;
  */
 class RankingCollection extends ResourceCollection
 {
+    /**
+     * Untyped because the parent property is untyped.
+     *
+     * @var class-string<RankingEntryResource>
+     */
     public $collects = RankingEntryResource::class;
 
     public function __construct(private readonly Ranking $ranking)
