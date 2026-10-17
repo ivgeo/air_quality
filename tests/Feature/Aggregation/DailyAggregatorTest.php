@@ -189,12 +189,12 @@ class DailyAggregatorTest extends TestCase
         $matches = fn (array $context): bool => $context['city'] === $this->city->slug
             && $context['from'] === '2026-07-14'
             && $context['to'] === '2026-07-16';
-        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation started' && $matches($context));
-        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation finished'
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation started' && $matches($context))->once();
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation finished'
             && $matches($context)
             && $context['days'] === 3
             && $context['rows_written'] === 3
-            && $context['duration_ms'] >= 0);
+            && $context['duration_ms'] >= 0)->once();
     }
 
     /**
