@@ -6,6 +6,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Calendar timezone
+    |--------------------------------------------------------------------------
+    |
+    | Hourly data is stored in UTC; a calendar day (the `date` of the daily rows and of every
+    | requested period) starts and ends at local midnight in this timezone, so a day spans 23, 24
+    | or 25 UTC hours. Only App\Support\LocalCalendar reads it.
+    |
+    */
+
+    'timezone' => 'Europe/Sofia',
+
+    /*
+    |--------------------------------------------------------------------------
     | Data providers
     |--------------------------------------------------------------------------
     |

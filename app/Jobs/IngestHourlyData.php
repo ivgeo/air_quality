@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\IngestionOutcome;
 use App\Enums\IngestionType;
 use App\Ingestion\HourlyIngestor;
 use App\Models\City;
@@ -46,7 +47,12 @@ class IngestHourlyData implements ShouldBeUnique, ShouldQueue
 
     public function handle(HourlyIngestor $ingestor): void
     {
-        $ingestor->ingest($this->provider, $this->city, $this->type, $this->from, $this->to);
+        $run = $ingestor->ingest($this->provider, $this->city, $this->type, $this->from, $this->to);
+
+        // Recompute the days of the requested period; a failed run changed nothing.
+        if ($run->outcome === IngestionOutcome::Success) {
+            AggregateDailyData::dispatch($this->city, $run->period_from, $run->period_to);
+        }
     }
 
     /**
