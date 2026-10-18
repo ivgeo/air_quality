@@ -4,6 +4,7 @@ namespace Tests\Feature\Ingestion;
 
 use App\Ingestion\Data\NoProviderState;
 use App\Ingestion\DatabaseProviderStateStore;
+use App\Ingestion\Providers\OpenAq\OpenAqState;
 use App\Models\DataProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -42,6 +43,17 @@ class ProviderStateStoreTest extends TestCase
 
         $this->assertInstanceOf(FakeProviderState::class, $state);
         $this->assertSame(['cities' => ['sofia' => ['seen' => 1]]], $state->toArray());
+    }
+
+    public function test_openaq_reads_its_discovered_stations(): void
+    {
+        $provider = DataProvider::factory()->create(['slug' => 'openaq']);
+        (new DatabaseProviderStateStore('openaq'))->putCity('sofia', ['discovered_at' => '2026-10-18T10:00:00+00:00', 'sensors' => [['id' => 101, 'metric' => 'pm25', 'location' => 'Sofia']]]);
+
+        $state = $provider->refresh()->state;
+
+        $this->assertInstanceOf(OpenAqState::class, $state);
+        $this->assertSame(101, $state->city('sofia')->sensors[0]->id);
     }
 
     public function test_an_unknown_slug_reads_the_empty_state(): void
