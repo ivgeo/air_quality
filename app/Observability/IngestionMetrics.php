@@ -6,7 +6,8 @@ use App\Enums\IngestionOutcome;
 use App\Models\IngestionRun;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Collection as RowCollection;
 
 /**
  * Ingestion metrics computed from the `ingestion_runs` journal. Provider-independent: every
@@ -14,39 +15,19 @@ use Illuminate\Support\Facades\DB;
  */
 class IngestionMetrics
 {
-    private const string RECENT = 'last_24h';
-
     /**
      * Run counts per outcome, rows and average duration, for the whole history (`total`) and the
-     * runs started in the last 24 hours (`last_24h`), in one pass over the journal. Running runs
-     * are counted but left out of the average duration.
+     * runs started in the last 24 hours (`last_24h`). Running runs are counted but left out of the
+     * average duration.
+     *
+     * `total` is one scan of the journal (it grows with the history); `last_24h` reads only its
+     * range through a covering index.
      *
      * @return array{total: array{runs: array{success: int, failed: int, running: int}, rows_written: int, rows_rejected: int, avg_duration_ms: int|null}, last_24h: array{runs: array{success: int, failed: int, running: int}, rows_written: int, rows_rejected: int, avg_duration_ms: int|null}}
      */
     public function summary(CarbonImmutable $now): array
     {
-        /** @var list<string> $columns */
-        $columns = [];
-
-        // The outcomes are enum constants, so they are inlined; `recent` marks the last 24 hours.
-        foreach (['total' => 'TRUE', self::RECENT => 'recent'] as $block => $in) {
-            foreach (IngestionOutcome::cases() as $outcome) {
-                $columns[] = "COUNT(CASE WHEN {$in} AND outcome = '{$outcome->value}' THEN 1 END) AS {$block}_{$outcome->value}";
-            }
-
-            $columns[] = "SUM(CASE WHEN {$in} THEN rows_written END) AS {$block}_rows_written";
-            $columns[] = "SUM(CASE WHEN {$in} THEN rows_rejected END) AS {$block}_rows_rejected";
-            $columns[] = "AVG(CASE WHEN {$in} AND outcome <> '".IngestionOutcome::Running->value."' THEN duration_ms END) AS {$block}_avg_duration_ms";
-        }
-
-        $sql = sprintf(
-            'SELECT %s FROM (SELECT outcome, rows_written, rows_rejected, duration_ms, started_at >= ? AS recent FROM ingestion_runs) AS runs',
-            implode(', ', $columns),
-        );
-        /** @var array<string, int|float|string|null> $values */
-        $values = (array) DB::selectOne($sql, [$now->subDay()->toDateTimeString()]);
-
-        return ['total' => $this->block($values, 'total'), self::RECENT => $this->block($values, self::RECENT)];
+        return ['total' => $this->block(null), 'last_24h' => $this->block($now->subDay())];
     }
 
     /**
@@ -57,9 +38,10 @@ class IngestionMetrics
     public function lastRunByProvider(): Collection
     {
         return IngestionRun::query()
-            ->whereIn('id', IngestionRun::query()->selectRaw('MAX(id)')->groupBy('data_provider_id'))
+            ->select('ingestion_runs.*')
+            ->joinSub(IngestionRun::query()->selectRaw('MAX(id) AS id')->groupBy('data_provider_id'), 'last_run', 'last_run.id', '=', 'ingestion_runs.id')
             ->with(['dataProvider:id,slug,name', 'city:id,slug,name'])
-            ->orderBy('data_provider_id')
+            ->orderBy('ingestion_runs.data_provider_id')
             ->get();
     }
 
@@ -80,22 +62,40 @@ class IngestionMetrics
     }
 
     /**
-     * @param  array<string, int|float|string|null>  $values
      * @return array{runs: array{success: int, failed: int, running: int}, rows_written: int, rows_rejected: int, avg_duration_ms: int|null}
      */
-    private function block(array $values, string $block): array
+    private function block(?CarbonImmutable $since): array
     {
-        $average = $values["{$block}_avg_duration_ms"];
+        /** @var RowCollection<int, object{outcome: string, runs: int|string, rows_written: int|string|null, rows_rejected: int|string|null, duration_sum: int|string|null, durations: int|string}> $rows */
+        $rows = IngestionRun::query()
+            ->toBase()
+            ->selectRaw('outcome, COUNT(*) AS runs, SUM(rows_written) AS rows_written, SUM(rows_rejected) AS rows_rejected, SUM(duration_ms) AS duration_sum, COUNT(duration_ms) AS durations')
+            ->when($since !== null, fn (Builder $query): Builder => $query->where('started_at', '>=', $since?->toDateTimeString()))
+            ->groupBy('outcome')
+            ->get();
+        /** @var array<string, int> $runs */
+        $runs = array_fill_keys(array_column(IngestionOutcome::cases(), 'value'), 0);
+        $written = 0;
+        $rejected = 0;
+        $durationSum = 0;
+        $durations = 0;
+
+        foreach ($rows as $row) {
+            $runs[$row->outcome] = (int) $row->runs;
+            $written += (int) $row->rows_written;
+            $rejected += (int) $row->rows_rejected;
+
+            if ($row->outcome !== IngestionOutcome::Running->value) {
+                $durationSum += (int) $row->duration_sum;
+                $durations += (int) $row->durations;
+            }
+        }
 
         return [
-            'runs' => [
-                'success' => (int) $values["{$block}_success"],
-                'failed' => (int) $values["{$block}_failed"],
-                'running' => (int) $values["{$block}_running"],
-            ],
-            'rows_written' => (int) $values["{$block}_rows_written"],
-            'rows_rejected' => (int) $values["{$block}_rows_rejected"],
-            'avg_duration_ms' => $average === null ? null : (int) round((float) $average),
+            'runs' => ['success' => $runs['success'], 'failed' => $runs['failed'], 'running' => $runs['running']],
+            'rows_written' => $written,
+            'rows_rejected' => $rejected,
+            'avg_duration_ms' => $durations === 0 ? null : (int) round($durationSum / $durations),
         ];
     }
 }
