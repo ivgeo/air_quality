@@ -210,6 +210,10 @@ class BenchmarkRankingCommand extends Command
             DB::table('air_quality_daily')->insert($rows);
         }
 
+        // Fresh index statistics, as a long-running database has: right after a bulk insert they
+        // are stale and the optimizer can miss the loose index scan of the stored periods.
+        DB::statement('ANALYZE TABLE air_quality_daily, city');
+
         $this->components->info(sprintf(
             'Generated %d cities × %d days × %d metrics = %d daily rows (seed %d), %s – %s.',
             $cities,
