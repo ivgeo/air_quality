@@ -26,7 +26,7 @@
         </a>
         <nav class="topbar__nav" aria-label="Main">
             <a href="{{ url('/docs/api') }}">API docs</a>
-            <a href="{{ route('metrics') }}" @if (request()->routeIs('metrics')) aria-current="page" @endif>Metrics</a>
+            <a href="{{ route('metrics') }}"@if (request()->routeIs('metrics')) aria-current="page"@endif>Metrics</a>
         </nav>
         <button type="button" class="icon-button" id="theme-toggle" aria-label="Switch to dark theme">
             <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
