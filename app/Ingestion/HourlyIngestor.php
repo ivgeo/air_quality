@@ -68,16 +68,25 @@ class HourlyIngestor
 
             $this->store($provider, $city, $series);
         } catch (ProviderNotConfiguredException $e) {
-            Log::warning('Ingestion run skipped: provider is not configured', [...$context, 'error' => $e->getMessage()]);
+            $run = $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
+            Log::warning('Ingestion run skipped: provider is not configured', [...$this->finalContext($context, $run), 'error' => $e->getMessage()]);
 
-            return $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
+            return $run;
         } catch (ProviderException $e) {
-            Log::error('Ingestion run failed', [...$context, 'error' => $e->getMessage()]);
+            $run = $this->finish($run, $startedAt, IngestionOutcome::Failed, rejected: $series?->rejected ?? 0, error: $e->getMessage());
+            Log::error('Ingestion run failed', [...$this->finalContext($context, $run), 'error' => $e->getMessage()]);
 
-            return $this->finish($run, $startedAt, IngestionOutcome::Failed, rejected: $series?->rejected ?? 0, error: $e->getMessage());
+            return $run;
         } catch (Throwable $e) {
             // Unexpected (e.g. database) errors are journaled too, then left to the queue to report.
-            Log::error('Ingestion run failed unexpectedly', [...$context, 'error' => $e->getMessage()]);
+            Log::error('Ingestion run failed unexpectedly', [
+                ...$context,
+                'outcome' => IngestionOutcome::Failed->value,
+                'rows_written' => 0,
+                'rows_rejected' => 0,
+                'duration_ms' => $this->elapsedMs($startedAt),
+                'error' => $e->getMessage(),
+            ]);
 
             try {
                 $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
@@ -90,7 +99,7 @@ class HourlyIngestor
 
         $run = $this->finish($run, $startedAt, IngestionOutcome::Success, count($series->hours), $series->rejected);
 
-        Log::info('Ingestion run finished', [...$context, 'written' => $run->rows_written, 'rejected' => $run->rows_rejected, 'duration_ms' => $run->duration_ms]);
+        Log::info('Ingestion run finished', $this->finalContext($context, $run));
 
         return $run;
     }
@@ -132,9 +141,31 @@ class HourlyIngestor
             'rows_rejected' => $rejected,
             'error' => $error,
             'finished_at' => CarbonImmutable::now(),
-            'duration_ms' => intdiv(hrtime(true) - $startedAt, 1_000_000),
+            'duration_ms' => $this->elapsedMs($startedAt),
         ]);
 
         return $run;
+    }
+
+    /**
+     * The context of the log line that ends a run, the same for every outcome.
+     *
+     * @param  array<string, string>  $context
+     * @return array<string, string|int|null>
+     */
+    private function finalContext(array $context, IngestionRun $run): array
+    {
+        return [
+            ...$context,
+            'outcome' => $run->outcome->value,
+            'rows_written' => $run->rows_written,
+            'rows_rejected' => $run->rows_rejected,
+            'duration_ms' => $run->duration_ms,
+        ];
+    }
+
+    private function elapsedMs(int $startedAt): int
+    {
+        return intdiv(hrtime(true) - $startedAt, 1_000_000);
     }
 }

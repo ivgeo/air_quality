@@ -43,6 +43,7 @@ class DailyAggregator
 
         Log::info('Daily aggregation finished', [
             ...$context,
+            'outcome' => 'success',
             'days' => $days,
             'rows_written' => $rows,
             'duration_ms' => intdiv(hrtime(true) - $startedAt, 1_000_000),

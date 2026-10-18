@@ -177,7 +177,7 @@ class HourlyIngestorTest extends TestCase
 
         $this->ingest();
 
-        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $message === 'Ingestion run finished'
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'Ingestion run finished'
             && $this->hasFinalContext($context)
             && $context['provider'] === 'fake'
             && $context['type'] === 'scheduled'
@@ -186,7 +186,7 @@ class HourlyIngestorTest extends TestCase
             && $context['outcome'] === 'success'
             && $context['rows_written'] === 1
             && $context['rows_rejected'] === 1
-            && $context['duration_ms'] >= 0);
+            && $context['duration_ms'] >= 0)->once();
     }
 
     public function test_a_provider_failure_keeps_the_stored_rows_and_fails_the_run(): void
