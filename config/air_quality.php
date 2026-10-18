@@ -80,6 +80,8 @@ return [
     |
     | recent_failures: how many of the newest failed ingestion runs GET /api/v1/metrics lists.
     | redis_connection: the Redis connection (config/database.php) holding the API counters.
+    | retry_after_seconds: after a failed call the store is left alone this long (every call
+    | fails at once), so an unavailable Redis costs one slow attempt per interval.
     | untracked_routes: API route names logged but not counted, e.g. the metrics endpoint itself,
     | which the Metrics page polls every 30 seconds.
     |
@@ -88,6 +90,7 @@ return [
     'metrics' => [
         'recent_failures' => 5,
         'redis_connection' => 'metrics',
+        'retry_after_seconds' => 30,
         'untracked_routes' => ['api.v1.metrics'],
     ],
 

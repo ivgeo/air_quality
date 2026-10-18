@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Observability\CircuitBreakingApiMetricsStore;
 use App\Observability\Contracts\ApiMetricsStore;
 use App\Observability\RedisApiMetricsStore;
 use App\Support\LocalCalendar;
@@ -18,9 +19,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(LocalCalendar::class, fn (): LocalCalendar => new LocalCalendar((string) config('air_quality.timezone')));
-        $this->app->singleton(ApiMetricsStore::class, fn (Application $app): ApiMetricsStore => new RedisApiMetricsStore(
-            $app->make(RedisFactory::class),
-            (string) config('air_quality.metrics.redis_connection'),
+        $this->app->singleton(ApiMetricsStore::class, fn (Application $app): ApiMetricsStore => new CircuitBreakingApiMetricsStore(
+            new RedisApiMetricsStore($app->make(RedisFactory::class), (string) config('air_quality.metrics.redis_connection')),
+            storage_path('framework/cache/api-metrics-unavailable'),
+            (int) config('air_quality.metrics.retry_after_seconds'),
         ));
     }
 
