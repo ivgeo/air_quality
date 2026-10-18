@@ -263,7 +263,9 @@ provider; they read the database, the `ingestion_runs` journal and Redis.
 - **Metrics store** (`ok` / `unavailable`) is informative only: the API works without Redis, so it
   never changes the status.
 - `/health` is outside the `web` middleware group (no session), so it still answers 503 when the
-  database is down. Laravel's `/up` stays as the cheap liveness probe of the Docker healthcheck.
+  database is down. With the `mysql` container *stopped* (`docker compose stop mysql`) that takes
+  several seconds in this setup, because resolving the missing container name fails slowly; a
+  database server that refuses connections is reported at once. Laravel's `/up` stays as the cheap liveness probe of the Docker healthcheck.
 
 ### `GET /api/v1/metrics`
 
@@ -286,7 +288,12 @@ group): it measures the request in the application, then, after the response has
 it and adds it to one Redis hash with a single Lua script (atomic, one round trip: count, status
 class, latency sum and an atomic max). The Redis connection `metrics` has 0.5 s timeouts and no
 retries; if Redis is down the request is answered normally, the metric is skipped and
-`API metrics not recorded` is logged. The counters survive restarts (AOF on the `redis-data`
+`API metrics not recorded` is logged. A circuit breaker (`CircuitBreakingApiMetricsStore`) then
+leaves Redis alone for 30 s (`air_quality.metrics.retry_after_seconds`, a marker file in
+`storage/framework/cache`): every metrics call fails at once and `/health` reports `unavailable`
+immediately. Without it, a *stopped* Redis container costs ≈3 s per call (the failing DNS lookup of
+its name, which the 0.5 s timeouts do not cover) and would keep a PHP worker busy that long after
+every API request. The counters survive restarts (AOF on the `redis-data`
 volume). Only totals, a sum and a maximum are kept: no percentiles or time series.
 
 **Measured** on the test database with 200 000 synthetic runs (≈4.5 years at the scheduled rate,
