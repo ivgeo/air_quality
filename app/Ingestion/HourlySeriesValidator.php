@@ -59,7 +59,7 @@ class HourlySeriesValidator
         foreach ($values as $key => $value) {
             $metric = Metric::tryFrom((string) $key);
 
-            if ($metric !== null && $this->isValid($value)) {
+            if ($metric !== null && self::isValidValue($value)) {
                 $measurements = $measurements->with($metric, (float) $value);
             }
         }
@@ -67,7 +67,11 @@ class HourlySeriesValidator
         return $measurements;
     }
 
-    private function isValid(mixed $value): bool
+    /**
+     * The value rule alone, for a provider that combines several raw values into one (it must
+     * leave invalid ones out before averaging rather than let them skew the result).
+     */
+    public static function isValidValue(mixed $value): bool
     {
         return (is_int($value) || is_float($value)) && is_finite((float) $value) && $value >= 0;
     }
