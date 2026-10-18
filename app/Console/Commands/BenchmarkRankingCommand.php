@@ -6,6 +6,8 @@ use App\Data\StatusFlags;
 use App\Enums\Metric;
 use App\Enums\Status;
 use App\Models\QualityMetric;
+use App\Ranking\CityRanking;
+use App\Ranking\DateRange;
 use App\Support\LocalCalendar;
 use App\Support\TestDatabase;
 use Carbon\CarbonImmutable;
@@ -13,6 +15,7 @@ use Database\Seeders\QualityMetricSeeder;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Random\Engine\Mt19937;
@@ -34,7 +37,22 @@ class BenchmarkRankingCommand extends Command
      */
     private const array TABLES = ['air_quality_daily', 'air_quality_hourly', 'ingestion_runs', 'city'];
 
-    public function handle(LocalCalendar $calendar, QualityMetricSeeder $metrics): int
+    /**
+     * Measured period lengths in days, each ending on the last stored day.
+     */
+    private const array PERIODS = [1, 30, 182, 1826];
+
+    /**
+     * The CityRanking method whose queries are being captured, or null while not capturing.
+     */
+    private ?string $capturing = null;
+
+    /**
+     * @var list<array{method: string, query: QueryExecuted}>
+     */
+    private array $captured = [];
+
+    public function handle(LocalCalendar $calendar, QualityMetricSeeder $metrics, CityRanking $ranking): int
     {
         try {
             $cities = $this->positiveIntOption('cities');
@@ -51,7 +69,39 @@ class BenchmarkRankingCommand extends Command
         $this->callSilently('migrate', ['--force' => true]);
         $last = $calendar->today();
         $this->generate($metrics, $cities, $days, $last, $seed);
+        DB::listen(function (QueryExecuted $query): void {
+            if ($this->capturing !== null) {
+                $this->captured[] = ['method' => $this->capturing, 'query' => $query];
+            }
+        });
 
+        $metric = QualityMetric::query()->where('slug', Metric::Pm25->value)->firstOrFail();
+        /** @var list<list<string>> $summary */
+        $summary = [];
+
+        foreach (self::PERIODS as $length) {
+            $label = $length === 1 ? '1 day' : "{$length} days";
+
+            if ($length > $days) {
+                $this->components->warn("{$label}: skipped, longer than the {$days} generated days.");
+
+                continue;
+            }
+
+            $period = new DateRange($last->subDays($length - 1), $last);
+            $this->newLine();
+            $this->line(sprintf('<options=bold>%s (%s – %s)</>', $label, $period->from->toDateString(), $period->to->toDateString()));
+            $sql = $this->measureSql($ranking, $metric, $period, $repeat);
+            $summary[] = [
+                $label,
+                ...array_map(fn (float $ms): string => number_format($ms, 2), array_values($sql)),
+                number_format(array_sum($sql), 2),
+            ];
+        }
+
+        $this->newLine();
+        $this->line(sprintf('Medians of %d run(s) in ms, %s:', $repeat, Metric::Pm25->label()));
+        $this->table(['Period', 'storedPeriods SQL', 'rank SQL', 'SQL total'], $summary);
         $this->components->info(sprintf('The synthetic data stays in %s until the next `make test`.', TestDatabase::NAME));
 
         return self::SUCCESS;
@@ -160,5 +210,61 @@ class BenchmarkRankingCommand extends Command
             $first->toDateString(),
             $last->toDateString(),
         ));
+    }
+
+    /**
+     * Runs the queries of CityRanking once to warm up, prints their EXPLAIN ANALYZE, then runs
+     * them `$repeat` times.
+     *
+     * @return array<string, float> the median duration in ms per CityRanking method
+     */
+    private function measureSql(CityRanking $ranking, QualityMetric $metric, DateRange $period, int $repeat): array
+    {
+        /** @var array<string, list<float>> $durations */
+        $durations = [];
+
+        for ($run = 0; $run <= $repeat; $run++) {
+            $this->captured = [];
+            $this->capturing = 'storedPeriods';
+            $stored = $ranking->storedPeriods($metric);
+            $this->capturing = 'rank';
+            $ranking->rank($metric, $period, $stored);
+            $this->capturing = null;
+
+            if ($run === 0) {
+                foreach ($this->captured as ['method' => $method, 'query' => $query]) {
+                    $this->line("EXPLAIN ANALYZE {$method}:");
+                    /** @var object{EXPLAIN: string} $plan */
+                    $plan = DB::selectOne('EXPLAIN ANALYZE '.$query->sql, $query->bindings);
+                    $this->line($plan->EXPLAIN);
+                }
+
+                continue;
+            }
+
+            /** @var array<string, float> $totals */
+            $totals = ['storedPeriods' => 0.0, 'rank' => 0.0];
+
+            foreach ($this->captured as ['method' => $method, 'query' => $query]) {
+                $totals[$method] += $query->time;
+            }
+
+            foreach ($totals as $method => $ms) {
+                $durations[$method][] = $ms;
+            }
+        }
+
+        return array_map($this->median(...), $durations);
+    }
+
+    /**
+     * @param  list<float>  $values
+     */
+    private function median(array $values): float
+    {
+        sort($values);
+        $middle = intdiv(count($values), 2);
+
+        return count($values) % 2 === 1 ? $values[$middle] : ($values[$middle - 1] + $values[$middle]) / 2;
     }
 }
