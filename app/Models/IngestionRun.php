@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Enums\IngestionOutcome;
 use App\Enums\IngestionType;
+use Database\Factories\IngestionRunFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Attributes\WithoutTimestamps;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -18,6 +20,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[WithoutTimestamps]
 class IngestionRun extends Model
 {
+    /** @use HasFactory<IngestionRunFactory> */
+    use HasFactory;
+
     /**
      * @return BelongsTo<City, $this>
      */
