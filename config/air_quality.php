@@ -59,4 +59,36 @@ return [
         'backfill_days' => 186,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Health check
+    |--------------------------------------------------------------------------
+    |
+    | freshness_hours: /health reports an active provider as stale (status "degraded") when its
+    | latest successful run finished longer ago than this; the scheduler runs every hour.
+    |
+    */
+
+    'health' => [
+        'freshness_hours' => 3,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Metrics
+    |--------------------------------------------------------------------------
+    |
+    | recent_failures: how many of the newest failed ingestion runs GET /api/v1/metrics lists.
+    | redis_connection: the Redis connection (config/database.php) holding the API counters.
+    | untracked_routes: API route names logged but not counted, e.g. the metrics endpoint itself,
+    | which the Metrics page polls every 30 seconds.
+    |
+    */
+
+    'metrics' => [
+        'recent_failures' => 5,
+        'redis_connection' => 'metrics',
+        'untracked_routes' => ['api.v1.metrics'],
+    ],
+
 ];
