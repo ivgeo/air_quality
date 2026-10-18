@@ -697,11 +697,14 @@ th[aria-sort="descending"] .sort::after {
     display: flex;
     flex-direction: column;
     gap: 28px;
+}
+
+.metrics > * {
     transition: opacity 0.2s;
 }
 
 /* Values from an earlier load while the current one failed: never let them look current. */
-.metrics.is-stale {
+.is-stale {
     opacity: 0.45;
     filter: grayscale(1);
 }

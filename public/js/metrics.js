@@ -16,6 +16,8 @@
 
     const root = document.getElementById('metrics');
     const content = document.getElementById('content');
+    const healthPanel = document.getElementById('health');
+    const metricsSections = Array.from(document.querySelectorAll('.metrics__section'));
     const alert = document.getElementById('alert');
     const updated = document.getElementById('updated');
     const refreshButton = document.getElementById('refresh');
@@ -197,10 +199,15 @@
     }
 
     /**
-     * Anything not fully current (database down, an endpoint failing) gets a message, and the
-     * values left from an earlier load are dimmed so they never pass for current ones.
+     * Anything not fully current (database down, an endpoint failing) gets a message, and the part
+     * whose response failed is dimmed, so values left from an earlier load never pass for current.
      */
     function showOutcome(health, metrics) {
+        healthPanel.classList.toggle('is-stale', !health);
+        metricsSections.forEach(function (section) {
+            section.classList.toggle('is-stale', !metrics);
+        });
+
         /** @type {string|null} */
         let problem = null;
 
@@ -210,19 +217,20 @@
             problem = 'Could not load ' + (!health && !metrics ? 'the health check and the metrics' : (!health ? 'the health check' : 'the metrics')) + '.';
         }
 
+        if (metrics) {
+            content.dataset.loaded = 'true';
+        }
+
         if (problem) {
-            const loadedBefore = content.dataset.loaded === 'true';
-            alert.textContent = problem + (loadedBefore ? ' The values below are from the last successful update.' : '');
+            const stale = !metrics && content.dataset.loaded === 'true';
+            alert.textContent = problem + (stale ? ' The metrics below are from the last successful update.' : '');
             alert.hidden = false;
-            content.classList.add('is-stale');
             updated.textContent = 'Update failed at ' + time.format(new Date());
 
             return;
         }
 
         alert.hidden = true;
-        content.classList.remove('is-stale');
-        content.dataset.loaded = 'true';
         updated.textContent = 'Updated ' + time.format(new Date());
     }
 
