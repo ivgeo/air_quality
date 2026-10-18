@@ -27,10 +27,16 @@ class IngestHourlyData implements ShouldBeUnique, ShouldQueue
     public int $maxExceptions = 1;
 
     /**
-     * Covers the provider's worst case (3 attempts x (15 s + 5 s connect) + sleeps) and stays below
-     * the database queue's retry_after (90 s), so a slow job is never handed out twice.
+     * The timeout of a provider without `job_timeout` in config/air_quality.php: Open-Meteo's worst
+     * case, 3 attempts x (15 s + 5 s connect) + sleeps.
      */
-    public int $timeout = 80;
+    public const int DEFAULT_TIMEOUT = 80;
+
+    /**
+     * The provider's `job_timeout`; it stays below the database queue's retry_after (330 s), so a
+     * slow job is never handed out twice.
+     */
+    public int $timeout;
 
     /**
      * A job of the same type, provider and city waiting in the queue makes a new one redundant.
@@ -43,7 +49,9 @@ class IngestHourlyData implements ShouldBeUnique, ShouldQueue
         public readonly IngestionType $type,
         public readonly CarbonImmutable $from,
         public readonly CarbonImmutable $to,
-    ) {}
+    ) {
+        $this->timeout = (int) config("air_quality.providers.{$provider->slug}.job_timeout", self::DEFAULT_TIMEOUT);
+    }
 
     public function handle(HourlyIngestor $ingestor): void
     {
