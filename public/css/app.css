@@ -188,6 +188,10 @@ button {
     background: var(--soft);
 }
 
+.topbar__nav a[aria-current="page"] {
+    color: var(--accent);
+}
+
 .icon-button {
     width: 44px;
     height: 44px;
@@ -661,7 +665,7 @@ th[aria-sort="descending"] .sort::after {
     }
 
     .topbar__nav a {
-        padding: 11px 10px;
+        padding: 11px 8px;
     }
 
     .page {
@@ -680,5 +684,13 @@ th[aria-sort="descending"] .sort::after {
     .button {
         margin-top: 0;
         width: 100%;
+    }
+}
+
+/* Two nav links and the full brand do not fit on one row on a phone: keep the logo only (the
+   link keeps its name through aria-label). */
+@media (max-width: 440px) {
+    .brand span {
+        display: none;
     }
 }

@@ -20,7 +20,6 @@
     const periodButtons = Array.from(document.querySelectorAll('[data-days]'));
     const metricButtons = Array.from(document.querySelectorAll('[data-metric]'));
     const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
-    const themeToggle = document.getElementById('theme-toggle');
     const status = document.getElementById('status');
     const alert = document.getElementById('alert');
     const result = document.getElementById('result');
@@ -327,35 +326,7 @@
         return cell;
     }
 
-    // ---- Theme -------------------------------------------------------------------------------
-
-    const darkScheme = window.matchMedia('(prefers-color-scheme: dark)');
-
-    function currentTheme() {
-        return document.documentElement.dataset.theme || (darkScheme.matches ? 'dark' : 'light');
-    }
-
-    function updateThemeToggle() {
-        themeToggle.setAttribute('aria-label', 'Switch to ' + (currentTheme() === 'dark' ? 'light' : 'dark') + ' theme');
-    }
-
-    function toggleTheme() {
-        const theme = currentTheme() === 'dark' ? 'light' : 'dark';
-        document.documentElement.dataset.theme = theme;
-
-        try {
-            localStorage.setItem('theme', theme);
-        } catch (e) {
-            // Storage blocked (e.g. a private window): the choice lasts until the page is reloaded.
-        }
-
-        updateThemeToggle();
-    }
-
     // ---- Events ------------------------------------------------------------------------------
-
-    themeToggle.addEventListener('click', toggleTheme);
-    darkScheme.addEventListener('change', updateThemeToggle);
 
     sortButtons.forEach(function (button) {
         button.addEventListener('click', function () {
@@ -402,6 +373,5 @@
         return button.dataset.days === String(DEFAULT_DAYS);
     }));
     selectMetric(state.metric);
-    updateThemeToggle();
     load();
 }());

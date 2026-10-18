@@ -88,6 +88,13 @@ class RankingPageTest extends TestCase
             ->assertSee('href="'.url('/docs/api').'"', false);
     }
 
+    public function test_the_header_links_to_the_metrics_page_next_to_the_api_docs(): void
+    {
+        $this->get('/')
+            ->assertSeeInOrder(['href="'.url('/docs/api').'"', 'API docs', 'href="'.route('metrics').'"', 'Metrics'], false)
+            ->assertDontSee('aria-current="page"', false);
+    }
+
     public function test_the_page_loads_no_external_resources_and_no_vite_build(): void
     {
         $response = $this->get('/');
@@ -113,7 +120,7 @@ class RankingPageTest extends TestCase
     {
         $response = $this->get('/');
 
-        foreach (['css/app.css', 'js/ranking.js'] as $file) {
+        foreach (['css/app.css', 'js/theme.js', 'js/ranking.js'] as $file) {
             $this->assertFileExists(public_path($file));
             $response->assertSee(asset($file).'?v=', false);
         }

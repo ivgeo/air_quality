@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Without the web group: they use no session, so they still answer when the database is down.
         then: function (): void {
             Route::get('/health', HealthController::class)->name('health');
+            Route::view('/metrics', 'metrics')->name('metrics');
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
