@@ -3,8 +3,17 @@
 A web service and minimal web UI that answers: *which Bulgarian city had the cleanest air
 (average PM2.5, µg/m³) over a given period?*
 
-> Work in progress: this README currently covers running the project. Architecture, data source,
-> assumptions and trade-offs will be documented as the features land.
+Data is collected from two providers by scheduled background jobs, stored locally (hourly, plus
+daily pre-aggregates) and served from the local database only. The answer is the first entry of a
+ranking of all cities (Sofia, Plovdiv, Varna, Burgas, Ruse) for any period inside the stored
+history.
+
+**Contents**: [Quick start](#quick-start) · [Architecture](#architecture) ·
+[Data sources](#data-sources) · [How measurements map to cities](#how-measurements-map-to-cities) ·
+[Data collection](#data-collection) · [Daily aggregation](#daily-aggregation) · [Web UI](#web-ui) ·
+[API](#api) · [Performance](#performance) · [Observability](#observability) · [Tests](#tests) ·
+[Configuration](#configuration) · [Assumptions](#assumptions) · [Trade-offs](#trade-offs) ·
+[Future improvements](#future-improvements) · [AI usage](#ai-usage)
 
 ## Requirements
 
@@ -16,13 +25,33 @@ Nothing else is needed on the host: PHP, Composer and Artisan all run inside the
 ## Quick start
 
 ```bash
+make up                                      # build and start everything (the one start command)
+make artisan ARGS="air-quality:backfill"     # once: queue the collection of the last 186 days
+```
+
+`make up` builds the images and starts the stack. On the first run it also creates `.env` from
+`.env.example`, installs the Composer dependencies, generates `APP_KEY`, runs the migrations and
+seeds the cities, metrics and providers. It returns once every service is healthy, and it is safe
+to run again: an existing `.env` is never overwritten.
+
+The database starts empty, so run the backfill once. It only queues jobs; the `queue` service
+collects the data in the background (Open-Meteo alone takes under a minute, OpenAQ a few minutes
+more, see `make logs ARGS="queue"`). Then open http://localhost:8088. From then on the scheduler
+refreshes the data every hour. Until the first runs finish, the ranking answers `422` ("data has
+not been collected yet") and `/health` reports `degraded` (no successful run yet); both are
+expected.
+
+**OpenAQ is optional.** Without a key the app runs on Open-Meteo alone. To use OpenAQ as well,
+get a free key at https://explore.openaq.org/register and put it in `.env` **before the first**
+`make up`:
+
+```bash
+cp .env.example .env        # then set OPENAQ_API_KEY=... in .env
 make up
 ```
 
-That single command builds the images and starts the stack. On the first run it also creates `.env`
-from `.env.example`, installs the Composer dependencies, generates `APP_KEY` and runs the
-migrations. It returns once every service is healthy, and it is safe to run again: an existing
-`.env` is never overwritten.
+The provider is seeded active only when the key is present at that moment; adding the key later
+needs one manual step, see [Configuration](#enabling-openaq-later).
 
 | What    | URL                   | Notes                                                       |
 |---------|-----------------------|-------------------------------------------------------------|
@@ -32,6 +61,108 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 | Adminer | http://localhost:8089 | Local development only. Log in with server `mysql` and the `DB_USERNAME` / `DB_PASSWORD` from `.env` |
 | phpCacheAdmin | http://localhost:8090 | Local development only. Redis UI (the API metrics counters) |
 | MySQL   | `127.0.0.1:33060`     | For an IDE / database client (same credentials)             |
+
+## Architecture
+
+```
+ scheduler (hourly)          air-quality:backfill / :ingest
+        │                                 │
+        └──────────────┬──────────────────┘
+                       ▼  one job per active provider × active city
+            queue: IngestHourlyData ──► ProviderRegistry ──► AirQualityProvider (contract)
+                       │                                       ├─ OpenMeteoProvider
+                       │                                       └─ OpenAqProvider (+ station discovery)
+                       ▼  validated hours (HourlySeriesValidator), upsert in a transaction
+              air_quality_hourly  (UTC hour × city × provider, metrics as JSON)
+                       │  successful run ► AggregateDailyData job for its days
+                       ▼
+              air_quality_daily   (Europe/Sofia day × city × metric: sum + count)
+                       │
+                       ▼  CityRanking: a fixed number of index-only queries
+     GET /api/v1/ranking (JSON) ◄── web page (Blade + vanilla JS, a thin client of the API)
+
+  ingestion_runs journal + logs ──► GET /health, GET /api/v1/metrics, /metrics page
+```
+
+- **Collection is decoupled from serving.** Only the scheduler, the commands and the queue talk to
+  providers. A request reads the local database and nothing else, so a slow, failing or
+  misbehaving provider can delay new data but never a response, and never removes stored data.
+- **Provider abstraction.** `App\Ingestion\Contracts\AirQualityProvider` has one method,
+  `fetchHourly(City, from, to): HourlySeries`: one reading per UTC hour for the city, keyed by
+  `App\Enums\Metric`. Each provider translates only its own API (URL, parameters, response
+  shape, units, its own metric names); `ProviderRegistry` builds it from its entry in
+  `config/air_quality.php` by `data_provider.slug`. Value rules (missing, negative, future hours)
+  are shared (`HourlySeriesValidator`), and so are storage, retries, journaling and aggregation.
+  Nothing outside `app/Ingestion/Providers/` knows a concrete provider. Adding a provider is one
+  class, one config entry and one `data_provider` row.
+- **Two storage levels.** Hourly rows keep what each provider said, per provider, so the daily
+  level can always be rebuilt (`air-quality:aggregate`). Daily rows hold the **sum and count** per
+  city, local day and metric, so any period's average is exact and cheap: at most one row per
+  city and day is read, whatever the provider count.
+- **Reference data with status bitmasks.** `city`, `data_provider` and `quality_metric` have a
+  `status` bitmask and a generated `is_active` column; deactivating a row (e.g. a city) takes it
+  out of collection and ranking without deleting history.
+- **Observability** covers both sides: every ingestion job writes a row in `ingestion_runs` and
+  structured log lines; every API request is logged and counted. `/health` judges freshness per
+  provider, and `/api/v1/metrics` and the Metrics page summarise the journal and the API counters.
+
+## Data sources
+
+| Provider | What | Access | Terms |
+|----------|------|--------|-------|
+| [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api) (default) | Model data: the CAMS European regional ensemble, 0.1° (~11 km) grid, hourly PM2.5 and PM10 for any coordinates | No key, no registration | Data under [CC BY 4.0](https://open-meteo.com/en/licence) with attribution to Open-Meteo and to the Copernicus Atmosphere Monitoring Service (CAMS); the free API is for non-commercial use |
+| [OpenAQ API v3](https://docs.openaq.org/) (optional) | Measurements of reference monitoring stations; in Bulgaria these come from the EEA (the national ExEA network) | Free API key; 60 requests/minute, 2 000/hour | [Terms](https://docs.openaq.org/about/terms): attribution to OpenAQ and to the original source; the Bulgarian EEA stations are published under **ODC-BY** (as listed per location by the API) |
+
+**Why Open-Meteo first.** It needs no key or account, so a reviewer gets real data from `make up`
+and one backfill with zero setup. It covers every city with the same method (a regular model grid,
+no gaps when a station is down), returns the history the brief needs in one request per city
+(`start_hour` / `end_hour`, back to October 2023 for CAMS Europe), and has a simple, stable JSON format with
+units. The cost is that it is a model, not a measurement: CAMS smooths local sources such as
+traffic and domestic heating, and its values are often several times lower than a city station's
+(see below).
+
+**Why OpenAQ second.** It adds real measurements from official stations and exercises the
+provider abstraction with a very different API: a key, station discovery, per-sensor series,
+pagination and rate limits. It is optional because of the key.
+
+Both sources are credited here. The web UI does not show an attribution line yet, which CC BY
+asks for wherever the data is displayed (see [Future improvements](#future-improvements)).
+
+## How measurements map to cities
+
+A city is a name and the coordinates of its centre (`city` table, seeded by `CitySeeder`). Each
+provider maps those coordinates to its own data:
+
+- **Open-Meteo**: the city's coordinates are sent as they are; the API returns the CAMS grid cell
+  that contains them. One series per city, no choice to make. *Trade-off*: an ~11 km cell is an
+  area average, so a city centre and its surroundings look the same, and two close cities could
+  share a cell (the five cities here are far apart).
+- **OpenAQ**: stations are discovered around the city: `GET /v3/locations` within **15 km** of the
+  coordinates, only **Bulgarian** (`iso=BG`, so Giurgiu across the Danube from Ruse is excluded),
+  only **reference monitors** (`monitor=true`, no low-cost sensors) and only stations with a
+  measurement in the last **7 days**. Their PM2.5 / PM10 sensors are kept in
+  `data_provider.state` and rediscovered every 24 hours (the last known list is reused when
+  discovery fails). For every hour, the city's value of a metric is the **mean of its sensors**
+  with a valid value that hour, so OpenAQ, like Open-Meteo, writes one row per city and hour.
+  *Trade-offs*: a radius is simple and explainable but ignores administrative borders and station
+  type (traffic and background stations count equally); a station shut down months ago is not in
+  the current list, so its history is not backfilled.
+
+  With the current data (October 2026): Sofia has 6 stations (PM2.5 at 2 of them), Plovdiv 2,
+  Varna 2, Burgas 2 and Ruse 1. PM2.5 from OpenAQ exists only for **Sofia, Varna and Ruse**:
+  Burgas' stations measure only PM10, and Plovdiv's PM2.5 sensor has reported nothing since
+  2024-06.
+
+**Combining providers.** The daily aggregate adds up the hourly values of **all providers** for
+the city (`metric_sum`, `metric_count`), so the average gives every provider-hour the same weight.
+When both providers report, the city's average sits between the model and the measurement. That
+makes the mix matter: for the same hour Sofia had PM2.5 46.4 µg/m³ from its stations and
+9.2 µg/m³ from CAMS. A city with station data can therefore rank worse than a city that has only
+model data, because measurements of the same air read higher. The `measurements` field in the
+API (and the coverage column in the UI) shows the difference: about 24 values a day for a
+model-only city, up to ~48 for a city with both. Without the OpenAQ key every city is ranked on
+the same model and the comparison is like for like. Choosing or weighting sources per metric is
+listed in [Future improvements](#future-improvements).
 
 ## Stack
 
@@ -54,9 +185,9 @@ containers in the project directory stay owned by you.
 
 ## Data collection
 
-Air quality data is collected in the background and stored locally; a user request never calls the
-provider. The first provider is the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api)
-(CAMS Europe model, PM2.5 and PM10, hourly, UTC).
+Air quality data is collected in the background and stored locally; a user request never calls a
+provider. The providers are Open-Meteo and, when its key is configured, OpenAQ (see
+[Data sources](#data-sources)); both deliver PM2.5 and PM10 per UTC hour.
 
 | Command                                         | What it does                                                    |
 |-------------------------------------------------|-----------------------------------------------------------------|
@@ -75,6 +206,11 @@ written and rejected, error, duration) and logs its start and end; follow them w
 Providers are configured in `config/air_quality.php` (class, URL, timeouts, retries), keyed by
 `data_provider.slug`. Adding a provider means a class implementing
 `App\Ingestion\Contracts\AirQualityProvider`, a config entry and a `data_provider` row.
+
+OpenAQ requests share one rate limiter for the key (50/minute and 1 800/hour, below the free
+60 / 2 000), a `429` waits for `x-ratelimit-reset`, and `408` / `5xx` / connection errors are
+retried. A 186-day backfill of the five cities takes about 77 OpenAQ requests; Sofia (8 sensors)
+is the longest job at about 90 s.
 
 ## Daily aggregation
 
@@ -227,6 +363,83 @@ and no partial result:
 | Unknown or inactive metric                               | `metric`         |
 | No data collected yet for the metric (e.g. before the first backfill) | `metric` |
 
+## Performance
+
+The ranking must stay fast for any period length. How:
+
+- **Pre-aggregation.** Requests never read hourly rows: `air_quality_daily` has one row per city,
+  local day and metric (sum + count), written by the ingestion jobs. A 5-year period is
+  1 826 rows per city and metric instead of ~44 000 hourly values per provider.
+- **A fixed number of queries.** Validation reads the metric and the stored period per city
+  (`CityRanking::storedPeriods()`), then the ranking is one query (`CityRanking::rank()`), with the
+  grouping in a derived table. Three queries for any period, any number of cities.
+- **Index-only reads.** Both queries are answered from covering indexes on `air_quality_daily`,
+  never from the table rows:
+  - `(metric_id, date, city_id, metric_sum, metric_count)`: a range on the period, for short and
+    medium periods;
+  - `(metric_id, city_id, date, metric_sum, metric_count)`: MIN/MAX(date) per city by a **loose
+    index scan** (*skip scan for grouping*, two index entries per city whatever the history) for
+    the stored periods, and an ordered group-by without a temporary table for long periods.
+
+**How it was measured.** `EXPLAIN ANALYZE` of the exact queries the API runs, and the median of
+10 timed requests after one warm-up, for periods of 1 day, 30 days, 6 months and 5 years.
+Environment: Intel i7-12700K, 32 GB, Docker on WSL2, MySQL 8.4.11 with default settings, PHP 8.5
+FPM. Times on this setup vary by ±20 %, which is why medians are reported.
+
+1. **Development data** (5 cities, 187 days, 935 daily rows per metric), read only:
+   `EXPLAIN ANALYZE` through `make mysql`, and the response time through nginx:
+
+   ```bash
+   for i in $(seq 10); do curl -s -o /dev/null -w '%{time_total}\n' \
+     'http://localhost:8088/api/v1/ranking?from=2026-04-15&to=2026-10-18'; done | sort -n
+   ```
+
+2. **Synthetic volume**: 100 cities × 5 years (1 826 days) × 2 metrics = 365 200 daily rows, with
+   a reproducible command:
+
+   ```bash
+   make artisan ARGS="air-quality:benchmark"   # --cities=100 --days=1826 --repeat=10 --seed=42
+   ```
+
+   It works **only on the test database** `air_quality_test`: it points the connection there,
+   checks with `SELECT DATABASE()` that it really is that database (a `DB_URL` would win over the
+   name) and refuses to run otherwise, so the development data is never touched. Every run
+   deletes the previous synthetic data and generates it again from the seed (values per city and
+   day from a seeded Mersenne Twister), runs `ANALYZE TABLE`, then, per period, prints the
+   `EXPLAIN ANALYZE` of each `CityRanking` query, the median SQL time per query (captured with
+   `DB::listen()` while the real `CityRanking` methods run) and the median time of
+   `GET /api/v1/ranking` sent to the HTTP kernel in-process (routing, middleware, validation, the
+   queries and the JSON; no nginx or network; `terminate()` is not called, so the API metrics are
+   not polluted). The data stays in the test database for inspection (Adminer, `EXPLAIN`) until
+   the next `make test` resets it.
+
+**Results**, median ms (synthetic 100 × 5 years):
+
+| Period   | Rows read by `rank` | `storedPeriods` before → after | `rank` before → after | Endpoint in-process before → after |
+|----------|--------------------:|-------------------------------:|----------------------:|-----------------------------------:|
+| 1 day    |                 100 |                    43.5 → 0.7 |            0.9 → 0.6 |                         49.8 → 6.3 |
+| 30 days  |               3 000 |                    42.8 → 0.7 |            1.7 → 1.6 |                         47.9 → 5.8 |
+| 6 months |              18 200 |                    44.0 → 0.9 |            6.3 → 6.2 |                        52.9 → 10.9 |
+| 5 years  |             182 600 |                    43.0 → 0.9 |          54.4 → 27.3 |                       101.1 → 33.7 |
+
+Development data: the endpoint answers in ≈10–11 ms through nginx for 1 day, 30 days and the whole
+stored period alike (mostly PHP and HTTP; the two ranking queries take 0.1–0.5 ms).
+
+**What the measurement found and fixed.** Before, `storedPeriods()` joined `city` and grouped the
+whole history of the metric on every request: 365 200 index entries (`unq_city_date_metric`) and
+≈43 ms for *any* period, i.e. the cost grew with the stored history, not the period. Now it groups
+in a derived table by `(metric_id, city_id)`, a leftmost prefix of the new index, so MySQL reads
+MIN/MAX(date) by a loose index scan: 100 rows, <1 ms. A first, narrower version of the index
+(without the sums) was picked by MySQL for long ranking periods too and made the 5-year ranking
+*slower* (54 → 128 ms, a row lookup per entry); making it covering turned that into 27 ms. The
+second index costs one more index write per daily row (the hourly job writes ~10 rows);
+`air-quality:aggregate` over the whole development history took about the same time as before.
+
+**What still grows.** `rank()` reads one index entry per city and day of the period, so its
+cost is linear in `days × cities`: 0.6 ms for a day, 27 ms for 5 years of 100 cities. With the
+6-month retention of the brief and 5 cities that is under 1 ms; it would matter only with
+much longer periods or many more cities, see [Future improvements](#future-improvements).
+
 ## Observability
 
 Three read-only views of the application and its data collection. None of them calls the data
@@ -243,7 +456,8 @@ provider; they read the database, the `ingestion_runs` journal and Redis.
     "freshness": {
       "threshold_hours": 3,
       "providers": [
-        { "provider": "open-meteo", "name": "Open-Meteo", "status": "ok", "last_success_at": "2026-10-18T11:00:12+00:00" }
+        { "provider": "open-meteo", "name": "Open-Meteo", "status": "ok", "last_success_at": "2026-10-18T11:00:02+00:00" },
+        { "provider": "openaq", "name": "OpenAQ", "status": "ok", "last_success_at": "2026-10-18T11:00:11+00:00" }
       ]
     },
     "metrics_store": { "status": "ok" }
@@ -381,6 +595,9 @@ taken, change it there and run `make up` again:
 | `FORWARD_DB_PORT` | `33060` | MySQL on the host       |
 | `OPEN_METEO_URL`  | `https://air-quality-api.open-meteo.com` | Open-Meteo API base URL |
 | `OPEN_METEO_TIMEOUT` | `15` | Open-Meteo request timeout (seconds) |
+| `OPENAQ_API_KEY`  | empty   | OpenAQ API key; without it OpenAQ is seeded inactive (see below) |
+| `OPENAQ_URL`      | `https://api.openaq.org` | OpenAQ API base URL |
+| `OPENAQ_TIMEOUT`  | `15`    | OpenAQ request timeout (seconds) |
 | `REDIS_HOST`      | `redis` | Redis host (the Compose service) |
 | `REDIS_METRICS_DB` | `0`    | Redis database of the API metrics (tests use 15) |
 
@@ -394,3 +611,122 @@ initialises an empty data volume, so changing them later also requires recreatin
 
 Laravel logs go to `storage/logs/laravel.log` and to stderr (as JSON lines), so they also show up
 in `make logs`; see [Logs](#logs).
+
+### Enabling OpenAQ later
+
+Seeding never changes the status of an existing provider (activation is an operator's decision),
+so a key added after the first `make up` does not switch OpenAQ on by itself. Set the key in
+`.env`, then:
+
+```bash
+make mysql   # then: UPDATE data_provider SET status = status | 1 WHERE slug = 'openaq';
+make restart                                   # the queue and scheduler re-read .env
+make artisan ARGS="air-quality:backfill"       # fill OpenAQ's history
+```
+
+`status | 1` sets the ACTIVE bit (`is_active` is generated from it). To switch OpenAQ off again:
+`status = status & ~1`. An active OpenAQ without a key does not break anything: its runs fail with
+a clear "not configured" error and `/health` reports it as `degraded`.
+
+## Assumptions
+
+- **"Cleanest" = the lowest mean PM2.5** of the period, weighted by the number of hourly values
+  (sum / count over all hours), not a mean of daily means; equal means are ordered by name.
+  PM10 can be ranked too (`metric=pm10`).
+- **Days are Europe/Sofia calendar days**, so a day can have 23 or 25 hours at a DST switch;
+  the hourly data itself is stored in UTC.
+- **A city is its centre's coordinates**; its air is what the providers report for that point
+  (Open-Meteo) or within 15 km of it (OpenAQ).
+- **Partial coverage still ranks.** A city with data for only some days of the period is ranked
+  on those days, and the response says how many (`days_with_data`, `measurements`) so the user
+  can judge. A period with no data for any city returns an empty ranking, not an error.
+- **The stored period** is from the earliest to the latest day any active city has data for the
+  metric; requests outside it, in the future, or with `from > to` are rejected with `422`.
+- **History**: the backfill fetches 186 days, enough for any 6 calendar months plus a margin;
+  nothing is deleted afterwards, so the history only grows (5 cities × 2 providers ≈ 88 000 hourly
+  rows a year).
+- **Providers revise recent hours**, so the hourly job re-fetches the last 3 days and the
+  aggregation recomputes them.
+- "Today" is allowed once it has data and then covers the hours collected so far.
+
+## Trade-offs
+
+- **Model vs. measurement, mixed with equal weight.** Averaging all providers' hours is simple
+  and exact, but mixes a smoothed model with station data whose values are much higher, and not
+  every city has stations for every metric. The ranking is consistent and reproducible, but
+  comparing a city with stations to one without is not fully like for like (see
+  [How measurements map to cities](#how-measurements-map-to-cities)). Without the OpenAQ key the
+  comparison is model-only and like for like.
+- **Daily rows instead of hourly queries.** Fast reads for any period at the cost of a second
+  copy of the data and a background step: a new hour appears in the ranking once its city's
+  aggregation job has run (seconds after the ingestion job).
+- **Recompute whole days** rather than incrementally adding hours: always correct and idempotent,
+  at ~10 ms per city-day.
+- **`rank()` stays linear in the period** (see [Performance](#performance)); a monthly rollup
+  would make it nearly constant but adds a third level to keep consistent. Not needed for the
+  required history.
+- **Two covering indexes** on `air_quality_daily` (one per access path), so each daily row is
+  written to three indexes; writes are tiny compared to reads here.
+- **Station discovery by radius** and the current station list (see the mapping section).
+- **One queue worker** for all jobs: simple and enough for 5 cities, but an OpenAQ rate-limit
+  wait (up to 65 s) holds it.
+- **Redis for API counters only**, with totals and no time series or percentiles; everything else
+  stays in MySQL so there is a single source of truth.
+- **No authentication** and no rate limiting on the public API; the brief asks for neither.
+
+## Future improvements
+
+- **Source policy per metric**: rank on one provider at a time, or prefer measurements and fall
+  back to the model, or weight the providers, and let the API select it (`provider=`). Store the
+  provider in the daily table to make that possible.
+- **Monthly rollup** of `air_quality_daily` for very long periods or many cities: full months
+  from the rollup, the edges from the daily rows, so the ranking reads a nearly constant number
+  of rows.
+- **Online deployment** (a small VM or a container platform with managed MySQL), with a live URL,
+  TLS, the dev-only tools (Adminer, phpCacheAdmin) removed and `APP_DEBUG=false`.
+- **Attribution line in the UI** for Open-Meteo / CAMS and OpenAQ, as their licences ask.
+- **OpenAQ robustness** (from the code review of the provider): skip and log a single failing
+  sensor instead of failing the city's run; a separate queue (or a delayed `release()`) so
+  rate-limit waits do not hold the only worker; include stations that stopped during the
+  backfill period; skip sensors without recent data (`/v3/sensors/{id}`).
+- **Retention and pruning** of hourly rows and `ingestion_runs` past a configured age, and a
+  rollup for the all-time ingestion metrics.
+- **More cities** from a configuration file or an admin screen, and station selection per city
+  that can be reviewed and overridden.
+- **Caching** ranking responses per (period, metric) until the next aggregation, if traffic
+  grows; today a response costs a few milliseconds.
+- **Metrics in a standard format** (Prometheus endpoint) with latency percentiles.
+
+
+## AI usage
+
+**Tool.** Claude Code (Anthropic) in the terminal, working in this repository, with a set of
+project skills (`.claude/skills/`, not in the repository) that fix the workflow: a short brief per
+task, a technical analysis, a test coverage analysis and an implementation plan reviewed before
+any code, then plan steps run one by one with tests and one commit per step, and a code review of
+the diff before a task is closed.
+
+**What it was used for.**
+
+- Turning the brief into an ordered roadmap of tasks (AQ-1 … AQ-9) and, for each task, the
+  analysis and plan documents; design decisions in them were made by me, often after the
+  assistant laid out concrete options with their trade-offs.
+- Writing most of the code and the tests (PHPUnit, `Http::fake()` for every provider call) within
+  those plans, and the Docker / Makefile setup.
+- Reviewing its own diffs before each task was closed; a part of the `fix:` commits in the history
+  (e.g. bad hours never erasing stored data, job timeouts below the queue's `retry_after`,
+  OpenAQ `408` retries) came from those reviews and from manual end-to-end checks.
+- Measuring: `EXPLAIN ANALYZE`, the synthetic benchmark and the before/after numbers in
+  [Performance](#performance).
+- Drafting this README.
+
+**Where it helped.** Breadth and speed on well-defined work (the provider client, validation, the
+aggregation SQL, the tests), and keeping the many edge cases of the brief in view (time zones and
+DST, partial coverage, a provider that is slow or returns bad data). Measuring instead of
+assuming paid off: the benchmark showed that `storedPeriods()` read the whole history on every
+request, and that a first version of the fix made long rankings slower.
+
+**How the output was checked.** Every change went through `make test` (the full PHPUnit suite
+against a separate database) and, where it mattered, a manual check against the running stack
+(API with `curl`, the UI in a browser, `/health`, the logs). Numbers in this README are measured,
+not estimated.

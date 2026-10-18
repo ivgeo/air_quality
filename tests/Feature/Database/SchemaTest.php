@@ -39,6 +39,14 @@ class SchemaTest extends TestCase
         );
     }
 
+    public function test_daily_has_the_covering_index_for_the_stored_periods_and_long_rankings(): void
+    {
+        $this->assertSame(
+            ['metric_id', 'city_id', 'date', 'metric_sum', 'metric_count'],
+            $this->indexColumns('air_quality_daily', 'idx_air_quality_daily_metric_city_date'),
+        );
+    }
+
     #[TestWith('uniqueIndexes')]
     public function test_unique_indexes_cover_the_expected_columns(string $table, string $index, array $columns): void
     {

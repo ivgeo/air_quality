@@ -6,7 +6,6 @@ use App\Enums\Metric;
 use App\Models\City;
 use App\Models\QualityMetric;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -21,13 +20,20 @@ class CityRanking
      */
     public function storedPeriods(QualityMetric $metric): StoredPeriods
     {
+        // Grouped in a derived table (no join) by a leftmost prefix of the (metric_id, city_id, date)
+        // index, so MySQL reads MIN/MAX(date) by a loose index scan: two entries per city, whatever
+        // the length of the history.
+        $bounds = DB::table('air_quality_daily')
+            ->select('city_id')
+            ->selectRaw('MIN(date) AS first_day, MAX(date) AS last_day')
+            ->where('metric_id', $metric->id)
+            ->groupBy('metric_id', 'city_id');
+
         /** @var array<int, DateRange> $byCity */
-        $byCity = DB::table('air_quality_daily as d')
-            ->join('city as c', fn (JoinClause $join): JoinClause => $join->on('c.id', '=', 'd.city_id')->where('c.is_active', 1))
-            ->where('d.metric_id', $metric->id)
-            ->groupBy('d.city_id')
-            ->select('d.city_id')
-            ->selectRaw('MIN(d.date) AS first_day, MAX(d.date) AS last_day')
+        $byCity = DB::table('city as c')
+            ->joinSub($bounds, 'd', 'd.city_id', '=', 'c.id')
+            ->where('c.is_active', 1)
+            ->select('d.city_id', 'd.first_day', 'd.last_day')
             ->get()
             ->mapWithKeys(fn (object $row): array => [
                 (int) $row->city_id => new DateRange(CarbonImmutable::parse($row->first_day), CarbonImmutable::parse($row->last_day)),
@@ -56,7 +62,9 @@ class CityRanking
     {
         $overall = $stored->overall ?? throw new InvalidArgumentException('A ranking needs stored data of the metric.');
 
-        // Aggregating in a derived table keeps the scan on the covering (metric_id, date, ...) index.
+        // Aggregating in a derived table keeps the scan index-only: a range on the covering
+        // (metric_id, date, ...) index for short periods; for long ones MySQL prefers the covering
+        // (metric_id, city_id, date, ...) index, grouped by city without a temporary table.
         $totals = DB::table('air_quality_daily')
             ->select('city_id')
             ->selectRaw('SUM(metric_sum) AS total_sum, SUM(metric_count) AS total_count, COUNT(*) AS days')
