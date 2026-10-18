@@ -361,6 +361,83 @@ and no partial result:
 | Unknown or inactive metric                               | `metric`         |
 | No data collected yet for the metric (e.g. before the first backfill) | `metric` |
 
+## Performance
+
+The ranking must stay fast for any period length. How:
+
+- **Pre-aggregation.** Requests never read hourly rows: `air_quality_daily` has one row per city,
+  local day and metric (sum + count), written by the ingestion jobs. A 5-year period is
+  1 826 rows per city and metric instead of ~44 000 hourly values per provider.
+- **A fixed number of queries.** Validation reads the metric and the stored period per city
+  (`CityRanking::storedPeriods()`), then the ranking is one query (`CityRanking::rank()`), with the
+  grouping in a derived table. Three queries for any period, any number of cities.
+- **Index-only reads.** Both queries are answered from covering indexes on `air_quality_daily`,
+  never from the table rows:
+  - `(metric_id, date, city_id, metric_sum, metric_count)`: a range on the period, for short and
+    medium periods;
+  - `(metric_id, city_id, date, metric_sum, metric_count)`: MIN/MAX(date) per city by a **loose
+    index scan** (*skip scan for grouping*, two index entries per city whatever the history) for
+    the stored periods, and an ordered group-by without a temporary table for long periods.
+
+**How it was measured.** `EXPLAIN ANALYZE` of the exact queries the API runs, and the median of
+10 timed requests after one warm-up, for periods of 1 day, 30 days, 6 months and 5 years.
+Environment: Intel i7-12700K, 32 GB, Docker on WSL2, MySQL 8.4.11 with default settings, PHP 8.5
+FPM. Times on this setup vary by ±20 %, which is why medians are reported.
+
+1. **Development data** (5 cities, 187 days, 935 daily rows per metric), read only:
+   `EXPLAIN ANALYZE` through `make mysql`, and the response time through nginx:
+
+   ```bash
+   for i in $(seq 10); do curl -s -o /dev/null -w '%{time_total}\n' \
+     'http://localhost:8088/api/v1/ranking?from=2026-04-15&to=2026-10-18'; done | sort -n
+   ```
+
+2. **Synthetic volume**: 100 cities × 5 years (1 826 days) × 2 metrics = 365 200 daily rows, with
+   a reproducible command:
+
+   ```bash
+   make artisan ARGS="air-quality:benchmark"   # --cities=100 --days=1826 --repeat=10 --seed=42
+   ```
+
+   It works **only on the test database** `air_quality_test`: it points the connection there,
+   checks with `SELECT DATABASE()` that it really is that database (a `DB_URL` would win over the
+   name) and refuses to run otherwise, so the development data is never touched. Every run
+   deletes the previous synthetic data and generates it again from the seed (values per city and
+   day from a seeded Mersenne Twister), runs `ANALYZE TABLE`, then, per period, prints the
+   `EXPLAIN ANALYZE` of each `CityRanking` query, the median SQL time per query (captured with
+   `DB::listen()` while the real `CityRanking` methods run) and the median time of
+   `GET /api/v1/ranking` sent to the HTTP kernel in-process (routing, middleware, validation, the
+   queries and the JSON; no nginx or network; `terminate()` is not called, so the API metrics are
+   not polluted). The data stays in the test database for inspection (Adminer, `EXPLAIN`) until
+   the next `make test` resets it.
+
+**Results**, median ms (synthetic 100 × 5 years):
+
+| Period   | Rows read by `rank` | `storedPeriods` before → after | `rank` before → after | Endpoint in-process before → after |
+|----------|--------------------:|-------------------------------:|----------------------:|-----------------------------------:|
+| 1 day    |                 100 |                    43.5 → 0.7 |            0.9 → 0.6 |                         49.8 → 6.3 |
+| 30 days  |               3 000 |                    42.8 → 0.7 |            1.7 → 1.6 |                         47.9 → 5.8 |
+| 6 months |              18 200 |                    44.0 → 0.9 |            6.3 → 6.2 |                        52.9 → 10.9 |
+| 5 years  |             182 600 |                    43.0 → 0.9 |          54.4 → 27.3 |                       101.1 → 33.7 |
+
+Development data: the endpoint answers in ≈10–11 ms through nginx for 1 day, 30 days and the whole
+stored period alike (mostly PHP and HTTP; the two ranking queries take 0.1–0.5 ms).
+
+**What the measurement found and fixed.** Before, `storedPeriods()` joined `city` and grouped the
+whole history of the metric on every request: 365 200 index entries (`unq_city_date_metric`) and
+≈43 ms for *any* period, i.e. the cost grew with the stored history, not the period. Now it groups
+in a derived table by `(metric_id, city_id)`, a leftmost prefix of the new index, so MySQL reads
+MIN/MAX(date) by a loose index scan: 100 rows, <1 ms. A first, narrower version of the index
+(without the sums) was picked by MySQL for long ranking periods too and made the 5-year ranking
+*slower* (54 → 128 ms, a row lookup per entry); making it covering turned that into 27 ms. The
+second index costs one more index write per daily row (the hourly job writes ~10 rows);
+`air-quality:aggregate` over the whole development history took about the same time as before.
+
+**What still grows.** `rank()` reads one index entry per city and day of the period, so its
+cost is linear in `days × cities`: 0.6 ms for a day, 27 ms for 5 years of 100 cities. With the
+6-month retention of the brief and 5 cities that is under 1 ms; it would matter only with
+much longer periods or many more cities, see [Future improvements](#future-improvements).
+
 ## Observability
 
 Three read-only views of the application and its data collection. None of them calls the data
@@ -548,4 +625,73 @@ make artisan ARGS="air-quality:backfill"       # fill OpenAQ's history
 `status | 1` sets the ACTIVE bit (`is_active` is generated from it). To switch OpenAQ off again:
 `status = status & ~1`. An active OpenAQ without a key does not break anything: its runs fail with
 a clear "not configured" error and `/health` reports it as `degraded`.
+
+## Assumptions
+
+- **"Cleanest" = the lowest mean PM2.5** of the period, weighted by the number of hourly values
+  (sum / count over all hours), not a mean of daily means; equal means are ordered by name.
+  PM10 can be ranked too (`metric=pm10`).
+- **Days are Europe/Sofia calendar days**, so a day can have 23 or 25 hours at a DST switch;
+  the hourly data itself is stored in UTC.
+- **A city is its centre's coordinates**; its air is what the providers report for that point
+  (Open-Meteo) or within 15 km of it (OpenAQ).
+- **Partial coverage still ranks.** A city with data for only some days of the period is ranked
+  on those days, and the response says how many (`days_with_data`, `measurements`) so the user
+  can judge. A period with no data for any city returns an empty ranking, not an error.
+- **The stored period** is from the earliest to the latest day any active city has data for the
+  metric; requests outside it, in the future, or with `from > to` are rejected with `422`.
+- **History**: the backfill fetches 186 days, enough for any 6 calendar months plus a margin;
+  nothing is deleted afterwards, so the history only grows (5 cities × 2 providers ≈ 88 000 hourly
+  rows a year).
+- **Providers revise recent hours**, so the hourly job re-fetches the last 3 days and the
+  aggregation recomputes them.
+- "Today" is allowed once it has data and then covers the hours collected so far.
+
+## Trade-offs
+
+- **Model vs. measurement, mixed with equal weight.** Averaging all providers' hours is simple
+  and exact, but mixes a smoothed model with station data whose values are much higher, and not
+  every city has stations for every metric. The ranking is consistent and reproducible, but
+  comparing a city with stations to one without is not fully like for like (see
+  [How measurements map to cities](#how-measurements-map-to-cities)). Without the OpenAQ key the
+  comparison is model-only and like for like.
+- **Daily rows instead of hourly queries.** Fast reads for any period at the cost of a second
+  copy of the data and a background step: a new hour appears in the ranking once its city's
+  aggregation job has run (seconds after the ingestion job).
+- **Recompute whole days** rather than incrementally adding hours: always correct and idempotent,
+  at ~10 ms per city-day.
+- **`rank()` stays linear in the period** (see [Performance](#performance)); a monthly rollup
+  would make it nearly constant but adds a third level to keep consistent. Not needed for the
+  required history.
+- **Two covering indexes** on `air_quality_daily` (one per access path), so each daily row is
+  written to three indexes; writes are tiny compared to reads here.
+- **Station discovery by radius** and the current station list (see the mapping section).
+- **One queue worker** for all jobs: simple and enough for 5 cities, but an OpenAQ rate-limit
+  wait (up to 65 s) holds it.
+- **Redis for API counters only**, with totals and no time series or percentiles; everything else
+  stays in MySQL so there is a single source of truth.
+- **No authentication** and no rate limiting on the public API; the brief asks for neither.
+
+## Future improvements
+
+- **Source policy per metric**: rank on one provider at a time, or prefer measurements and fall
+  back to the model, or weight the providers, and let the API select it (`provider=`). Store the
+  provider in the daily table to make that possible.
+- **Monthly rollup** of `air_quality_daily` for very long periods or many cities: full months
+  from the rollup, the edges from the daily rows, so the ranking reads a nearly constant number
+  of rows.
+- **Online deployment** (a small VM or a container platform with managed MySQL), with a live URL,
+  TLS, the dev-only tools (Adminer, phpCacheAdmin) removed and `APP_DEBUG=false`.
+- **Attribution line in the UI** for Open-Meteo / CAMS and OpenAQ, as their licences ask.
+- **OpenAQ robustness** (from the code review of the provider): skip and log a single failing
+  sensor instead of failing the city's run; a separate queue (or a delayed `release()`) so
+  rate-limit waits do not hold the only worker; include stations that stopped during the
+  backfill period; skip sensors without recent data (`/v3/sensors/{id}`).
+- **Retention and pruning** of hourly rows and `ingestion_runs` past a configured age, and a
+  rollup for the all-time ingestion metrics.
+- **More cities** from a configuration file or an admin screen, and station selection per city
+  that can be reviewed and overridden.
+- **Caching** ranking responses per (period, metric) until the next aggregation, if traffic
+  grows; today a response costs a few milliseconds.
+- **Metrics in a standard format** (Prometheus endpoint) with latency percentiles.
 
