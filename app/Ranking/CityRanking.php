@@ -62,7 +62,9 @@ class CityRanking
     {
         $overall = $stored->overall ?? throw new InvalidArgumentException('A ranking needs stored data of the metric.');
 
-        // Aggregating in a derived table keeps the scan on the covering (metric_id, date, ...) index.
+        // Aggregating in a derived table keeps the scan index-only: a range on the covering
+        // (metric_id, date, ...) index for short periods; for long ones MySQL prefers the covering
+        // (metric_id, city_id, date, ...) index, grouped by city without a temporary table.
         $totals = DB::table('air_quality_daily')
             ->select('city_id')
             ->selectRaw('SUM(metric_sum) AS total_sum, SUM(metric_count) AS total_count, COUNT(*) AS days')

@@ -10,8 +10,9 @@ use Illuminate\Support\Facades\Schema;
  * entries per city instead of the metric's whole history.
  *
  * Covering, because MySQL also picks it for long ranking periods (grouped by city without a
- * temporary table): without the sums every entry was a row lookup, and the 5-year ranking of 100
- * cities took 128 ms instead of 54 ms; with them it takes 29 ms.
+ * temporary table): without the sums every entry was a row lookup and the 5-year ranking of 100
+ * cities became more than twice as slow; with them it is about twice as fast as before (see the
+ * Performance section of the README).
  */
 return new class extends Migration
 {
