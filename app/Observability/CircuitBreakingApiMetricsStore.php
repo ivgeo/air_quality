@@ -23,7 +23,9 @@ class CircuitBreakingApiMetricsStore implements ApiMetricsStore
 
     public function record(int $status, int $durationUs): void
     {
-        $this->call(fn () => $this->store->record($status, $durationUs));
+        $this->call(function () use ($status, $durationUs): void {
+            $this->store->record($status, $durationUs);
+        });
     }
 
     public function snapshot(): ApiMetricsSnapshot
