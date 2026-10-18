@@ -2,7 +2,11 @@
 
 namespace App\Providers;
 
+use App\Observability\Contracts\ApiMetricsStore;
+use App\Observability\RedisApiMetricsStore;
 use App\Support\LocalCalendar;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Redis\Factory as RedisFactory;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -14,6 +18,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(LocalCalendar::class, fn (): LocalCalendar => new LocalCalendar((string) config('air_quality.timezone')));
+        $this->app->singleton(ApiMetricsStore::class, fn (Application $app): ApiMetricsStore => new RedisApiMetricsStore(
+            $app->make(RedisFactory::class),
+            (string) config('air_quality.metrics.redis_connection'),
+        ));
     }
 
     /**
