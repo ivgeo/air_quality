@@ -3,16 +3,14 @@
 namespace Tests;
 
 use App\Observability\Contracts\ApiMetricsStore;
+use App\Support\TestDatabase;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use RuntimeException;
 use Tests\Fakes\InMemoryApiMetricsStore;
 
 abstract class TestCase extends BaseTestCase
 {
-    private const string TEST_DATABASE = 'air_quality_test';
-
     /**
      * Tests never reach a real provider: any request without a matching Http::fake() fails. The
      * API metrics go to an in-memory store, so no test needs Redis (except the store's own test).
@@ -39,15 +37,7 @@ abstract class TestCase extends BaseTestCase
      */
     protected function setUpTraits(): array
     {
-        $database = DB::connection()->getDatabaseName();
-
-        if ($database !== self::TEST_DATABASE) {
-            throw new RuntimeException(sprintf(
-                'Tests must run against the "%s" database, but "%s" is configured. Run `make artisan ARGS="config:clear"` and check phpunit.xml.',
-                self::TEST_DATABASE,
-                $database,
-            ));
-        }
+        TestDatabase::ensure(DB::connection(), 'Tests must not run against it: run `make artisan ARGS="config:clear"` and check phpunit.xml.');
 
         return parent::setUpTraits();
     }
