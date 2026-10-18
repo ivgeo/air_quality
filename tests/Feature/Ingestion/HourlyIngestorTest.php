@@ -25,6 +25,13 @@ class HourlyIngestorTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Context of every log line that ends a run, whatever its outcome.
+     *
+     * @var list<string>
+     */
+    private const array FINAL_LOG_KEYS = ['provider', 'city', 'type', 'from', 'to', 'outcome', 'rows_written', 'rows_rejected', 'duration_ms'];
+
     private City $city;
 
     private DataProvider $provider;
@@ -163,6 +170,25 @@ class HourlyIngestorTest extends TestCase
         $this->assertSame(['pm25' => 4.0], AirQualityHourly::where('data_provider_id', '!=', $this->provider->id)->sole()->data->toArray());
     }
 
+    public function test_a_successful_run_logs_its_full_context(): void
+    {
+        $this->respond(['2026-10-17 10:00' => ['pm25' => 12.3], '2026-10-17 11:00' => ['pm25' => null]]);
+        Log::spy();
+
+        $this->ingest();
+
+        Log::shouldHaveReceived('info')->once()->withArgs(fn (string $message, array $context): bool => $message === 'Ingestion run finished'
+            && $this->hasFinalContext($context)
+            && $context['provider'] === 'fake'
+            && $context['type'] === 'scheduled'
+            && $context['from'] === '2026-10-17 09:00:00'
+            && $context['to'] === '2026-10-17 12:00:00'
+            && $context['outcome'] === 'success'
+            && $context['rows_written'] === 1
+            && $context['rows_rejected'] === 1
+            && $context['duration_ms'] >= 0);
+    }
+
     public function test_a_provider_failure_keeps_the_stored_rows_and_fails_the_run(): void
     {
         $this->storeHour('2026-10-17 10:00', 1.0);
@@ -177,7 +203,11 @@ class HourlyIngestorTest extends TestCase
         $this->assertSame(0, $run->rows_written);
         $this->assertNotNull($run->finished_at);
         $this->assertNotNull($run->duration_ms);
-        Log::shouldHaveReceived('error')->once()->withArgs(fn (string $message, array $context): bool => $context['error'] === 'Open-Meteo responded with HTTP 502.' && $context['city'] === $this->city->slug);
+        Log::shouldHaveReceived('error')->once()->withArgs(fn (string $message, array $context): bool => $context['error'] === 'Open-Meteo responded with HTTP 502.'
+            && $context['city'] === $this->city->slug
+            && $this->hasFinalContext($context)
+            && $context['outcome'] === 'failed'
+            && $context['rows_written'] === 0);
     }
 
     public function test_a_response_without_any_valid_hour_deletes_nothing_and_fails_the_run(): void
@@ -203,8 +233,18 @@ class HourlyIngestorTest extends TestCase
         $this->assertSame(IngestionOutcome::Failed, $run->outcome);
         $this->assertSame(IngestionType::Backfill, $run->type);
         $this->assertStringContainsString('"not-configured"', $run->error);
-        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context): bool => $context['provider'] === 'not-configured');
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context): bool => $context['provider'] === 'not-configured'
+            && $this->hasFinalContext($context)
+            && $context['outcome'] === 'failed');
         Log::shouldNotHaveReceived('error');
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function hasFinalContext(array $context): bool
+    {
+        return array_diff(self::FINAL_LOG_KEYS, array_keys($context)) === [];
     }
 
     /**
