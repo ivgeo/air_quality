@@ -95,7 +95,8 @@ class OpenAqClient
                 return $this->decode($response);
             }
 
-            $transient = $response->serverError() || $response->tooManyRequests();
+            // 408: the API gives up on a slow query of its own (seen on long backfill pages).
+            $transient = $response->serverError() || $response->tooManyRequests() || $response->status() === 408;
             $reset = $response->tooManyRequests() ? $this->resetSeconds($response) : null;
 
             if ($reset !== null) {

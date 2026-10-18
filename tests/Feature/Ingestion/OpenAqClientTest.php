@@ -167,7 +167,7 @@ class OpenAqClientTest extends TestCase
 
     public static function transientStatuses(): array
     {
-        return ['rate limited' => [429], 'server error' => [503]];
+        return ['rate limited' => [429], 'server error' => [503], 'request timeout' => [408]];
     }
 
     #[DataProvider('clientErrors')]
