@@ -26,7 +26,7 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 
 | What    | URL                   | Notes                                                       |
 |---------|-----------------------|-------------------------------------------------------------|
-| App     | http://localhost:8088 | `/up` is the framework health route                         |
+| App     | http://localhost:8088 | The ranking page, see [Web UI](#web-ui); `/up` is the framework health route |
 | API docs | http://localhost:8088/docs/api | OpenAPI 3.1, see [API](#api)                     |
 | Adminer | http://localhost:8089 | Local development only. Log in with server `mysql` and the `DB_USERNAME` / `DB_PASSWORD` from `.env` |
 | MySQL   | `127.0.0.1:33060`     | For an IDE / database client (same credentials)             |
@@ -118,6 +118,37 @@ Invalid dates, `--from` after `--to` or an unknown city fail with an error and c
 - Full `air-quality:aggregate`: 935 city-days, 1 870 daily rows in ≈9.4 s (≈1.9 s per city,
   ≈10 ms per day, mostly the commit of each day's transaction). The hourly job only recomputes
   the last 4 days of one city (a few dozen ms).
+
+## Web UI
+
+http://localhost:8088 is a single page that answers the question of the brief. Pick a period and
+a metric, and it shows:
+
+- **Cleanest city**: the first city of the ranking and its average;
+- **Period**: the selected days, and **Available data**: the stored period (any range inside it
+  can be ranked);
+- **The ranking** of all cities: position, average (µg/m³), coverage (days with data out of the
+  days in the period, and the number of hourly measurements; incomplete coverage is highlighted)
+  and the period stored for each city. Columns `#`, City, Average and Coverage can be sorted;
+  the default order is the ranking itself.
+
+Periods: the quick buttons `7 days`, `30 days` (the default), `3 months` (90 days) and `6 months`
+(180 days) all end today; `Custom` (or editing From / To and pressing Apply) ranks any range.
+The metric switch lists the active metrics (PM2.5 by default, PM10). Light and dark themes follow
+the system setting; the toggle in the header overrides it and is remembered in the browser.
+
+The page is a thin client of [`GET /api/v1/ranking`](#get-apiv1ranking): every number comes from
+the API, and its validation errors (future dates, `from` after `to`, dates outside the stored
+period) are shown at the related field. It never calls the data provider. It is plain Blade, CSS
+and vanilla JavaScript served from `public/`, with no Node or build step and no external
+resources.
+
+"Today" for the quick buttons is the Europe/Sofia calendar day, rendered by the server. A tab left
+open past midnight keeps the previous day until it is reloaded.
+
+The fonts [DM Sans](https://github.com/googlefonts/dm-fonts) and
+[Sora](https://github.com/sora-xor/sora-font) are self-hosted from `public/fonts/` under the
+[SIL Open Font License 1.1](https://openfontlicense.org/).
 
 ## API
 

@@ -1,8 +1,6 @@
 <?php
 
-use Illuminate\Contracts\View\View;
+use App\Http\Controllers\RankingPageController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function (): View {
-    return view('welcome');
-});
+Route::get('/', RankingPageController::class)->name('ranking');
