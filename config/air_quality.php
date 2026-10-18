@@ -1,5 +1,6 @@
 <?php
 
+use App\Ingestion\Providers\OpenAq\OpenAqProvider;
 use App\Ingestion\Providers\OpenMeteoProvider;
 
 return [
@@ -23,9 +24,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | How to talk to each provider, keyed by `data_provider.slug`. Which providers actually run is
-    | decided by `data_provider.is_active`; an active provider without an entry here is skipped
-    | and its runs are recorded as failed. `class` must implement
-    | App\Ingestion\Contracts\AirQualityProvider and receives the whole entry as its config.
+    | decided by `data_provider.is_active`; an active provider without a usable entry here (none,
+    | or a required setting such as an API key missing) is skipped and its runs are recorded as
+    | failed. `class` must implement App\Ingestion\Contracts\AirQualityProvider and receives the
+    | whole entry as its config. `job_timeout` (seconds, default 80) bounds one ingestion job and
+    | must stay below the queue's retry_after (config/queue.php).
     |
     */
 
@@ -40,6 +43,36 @@ return [
             // Retries after the first attempt, for connection errors, 5xx and 429 only.
             'retries' => 2,
             'retry_sleep_ms' => 1000,
+        ],
+
+        // Reference stations (EEA) near each city, discovered by radius and kept in
+        // `data_provider.state`. The key is sent as a header and never logged.
+        'openaq' => [
+            'class' => OpenAqProvider::class,
+            'url' => env('OPENAQ_URL', 'https://api.openaq.org'),
+            'api_key' => env('OPENAQ_API_KEY'),
+            // Stations within this distance of the city's coordinates (the API allows 25 km).
+            'radius_m' => 15000,
+            // A station whose last measurement is older than this is treated as shut down.
+            'active_within_days' => 7,
+            // How long a city's discovered stations are reused before /locations is asked again.
+            'discovery_ttl_hours' => 24,
+            'timeout' => (int) env('OPENAQ_TIMEOUT', 15),
+            'connect_timeout' => 5,
+            // Retries after the first attempt, for connection errors, 5xx and 429 only; a 429 waits
+            // the x-ratelimit-reset seconds, capped at max_wait_seconds.
+            'retries' => 2,
+            'max_wait_seconds' => 65,
+            // Requests per window for the whole key (the free tier allows 60/minute and 2000/hour).
+            'rate_limit' => [
+                'per_minute' => 50,
+                'per_hour' => 1800,
+            ],
+            // Pages of 1000 hours per sensor; 186 days need 5.
+            'max_pages' => 10,
+            // A run gives up (failed) before the job timeout kills it, which would leave it running.
+            'time_budget_seconds' => 270,
+            'job_timeout' => 300,
         ],
     ],
 
