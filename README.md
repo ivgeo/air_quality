@@ -695,3 +695,49 @@ a clear "not configured" error and `/health` reports it as `degraded`.
   grows; today a response costs a few milliseconds.
 - **Metrics in a standard format** (Prometheus endpoint) with latency percentiles.
 
+
+## AI usage
+
+> **TODO (author): draft. Review every statement below, and fill in the marked places with
+> your own facts before submitting.**
+
+**Tool.** Claude Code (Anthropic) in the terminal, working in this repository, with a set of
+project skills (`.claude/skills/`, not in the repository) that fix the workflow: a short brief per
+task, a technical analysis, a test coverage analysis and an implementation plan reviewed before
+any code, then plan steps run one by one with tests and one commit per step, and a code review of
+the diff before a task is closed. The task documents are written in Bulgarian, the code and this
+README in English.
+
+**What it was used for.**
+
+- Turning the brief into an ordered roadmap of tasks (AQ-1 … AQ-9) and, for each task, the
+  analysis and plan documents; design decisions in them were made by me, often after the
+  assistant laid out concrete options with their trade-offs.
+- Writing most of the code and the tests (PHPUnit, `Http::fake()` for every provider call) within
+  those plans, and the Docker / Makefile setup.
+- Reviewing its own diffs before each task was closed; a part of the `fix:` commits in the history
+  (e.g. bad hours never erasing stored data, job timeouts below the queue's `retry_after`,
+  OpenAQ `408` retries) came from those reviews and from manual end-to-end checks.
+- Measuring: `EXPLAIN ANALYZE`, the synthetic benchmark and the before/after numbers in
+  [Performance](#performance).
+- Drafting this README.
+
+**Where it helped.** Breadth and speed on well-defined work (the provider client, validation, the
+aggregation SQL, the tests), and keeping the many edge cases of the brief in view (time zones and
+DST, partial coverage, a provider that is slow or returns bad data). Measuring instead of
+assuming paid off: the benchmark showed that `storedPeriods()` read the whole history on every
+request, and that a first version of the fix made long rankings slower.
+
+**Where I disagreed with or corrected it.**
+
+> **TODO (author):** your own examples. Places worth checking from the history: decisions in the
+> task documents where you chose a different option than the one proposed; review findings you
+> rejected; anything you had to fix by hand. Do not keep this list as is.
+
+- TODO
+- TODO
+
+**How the output was checked.** Every change went through `make test` (the full PHPUnit suite
+against a separate database) and, where it mattered, a manual check against the running stack
+(API with `curl`, the UI in a browser, `/health`, the logs). Numbers in this README are measured,
+not estimated.
