@@ -35,9 +35,11 @@ seeds the cities, metrics and providers. It returns once every service is health
 to run again: an existing `.env` is never overwritten.
 
 The database starts empty, so run the backfill once. It only queues jobs; the `queue` service
-collects the data in the background (Open-Meteo alone takes about a minute, OpenAQ a few minutes
+collects the data in the background (Open-Meteo alone takes under a minute, OpenAQ a few minutes
 more, see `make logs ARGS="queue"`). Then open http://localhost:8088. From then on the scheduler
-refreshes the data every hour.
+refreshes the data every hour. Until the first runs finish, the ranking answers `422` ("data has
+not been collected yet") and `/health` reports `degraded` (no successful run yet); both are
+expected.
 
 **OpenAQ is optional.** Without a key the app runs on Open-Meteo alone. To use OpenAQ as well,
 get a free key at https://explore.openaq.org/register and put it in `.env` **before the first**
@@ -698,15 +700,11 @@ a clear "not configured" error and `/health` reports it as `degraded`.
 
 ## AI usage
 
-> **TODO (author): draft. Review every statement below, and fill in the marked places with
-> your own facts before submitting.**
-
 **Tool.** Claude Code (Anthropic) in the terminal, working in this repository, with a set of
 project skills (`.claude/skills/`, not in the repository) that fix the workflow: a short brief per
 task, a technical analysis, a test coverage analysis and an implementation plan reviewed before
 any code, then plan steps run one by one with tests and one commit per step, and a code review of
-the diff before a task is closed. The task documents are written in Bulgarian, the code and this
-README in English.
+the diff before a task is closed.
 
 **What it was used for.**
 
@@ -727,15 +725,6 @@ aggregation SQL, the tests), and keeping the many edge cases of the brief in vie
 DST, partial coverage, a provider that is slow or returns bad data). Measuring instead of
 assuming paid off: the benchmark showed that `storedPeriods()` read the whole history on every
 request, and that a first version of the fix made long rankings slower.
-
-**Where I disagreed with or corrected it.**
-
-> **TODO (author):** your own examples. Places worth checking from the history: decisions in the
-> task documents where you chose a different option than the one proposed; review findings you
-> rejected; anything you had to fix by hand. Do not keep this list as is.
-
-- TODO
-- TODO
 
 **How the output was checked.** Every change went through `make test` (the full PHPUnit suite
 against a separate database) and, where it mattered, a manual check against the running stack
