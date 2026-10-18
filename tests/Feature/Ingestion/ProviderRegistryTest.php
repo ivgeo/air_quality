@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Ingestion;
 
+use App\Ingestion\DatabaseProviderStateStore;
 use App\Ingestion\Exceptions\ProviderNotConfiguredException;
 use App\Ingestion\ProviderRegistry;
 use App\Ingestion\Providers\OpenMeteoProvider;
@@ -25,6 +26,28 @@ class ProviderRegistryTest extends TestCase
 
         $this->assertInstanceOf(FakeAirQualityProvider::class, $provider);
         $this->assertSame('https://fake.test', $provider->config['url']);
+    }
+
+    public function test_the_provider_receives_a_state_store_for_its_slug(): void
+    {
+        config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class]]);
+
+        $provider = app(ProviderRegistry::class)->for('fake');
+
+        $this->assertInstanceOf(DatabaseProviderStateStore::class, $provider->state);
+        $this->assertSame('fake', $provider->state->slug);
+    }
+
+    public function test_class_for_names_the_configured_class_without_building_it(): void
+    {
+        $this->assertSame(OpenMeteoProvider::class, app(ProviderRegistry::class)->classFor('open-meteo'));
+    }
+
+    public function test_class_for_an_unknown_slug_is_not_configured(): void
+    {
+        $this->expectException(ProviderNotConfiguredException::class);
+
+        app(ProviderRegistry::class)->classFor('unknown');
     }
 
     public function test_a_slug_without_config_is_not_configured(): void
