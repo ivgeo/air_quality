@@ -31,7 +31,7 @@ class MetricsApiTest extends TestCase
     public function test_the_totals_and_the_last_24_hours_match_the_runs(): void
     {
         $this->ingestionRun(['started_at' => '2026-10-18 11:00:00', 'rows_written' => 72, 'rows_rejected' => 2, 'duration_ms' => 1000]);
-        $this->ingestionRun(['started_at' => '2026-10-17 13:00:00', 'rows_written' => 70, 'rows_rejected' => 0, 'duration_ms' => 3000], 'failed');
+        $this->ingestionRun(['started_at' => '2026-10-17 13:00:00', 'duration_ms' => 3000], 'failed');
         $this->ingestionRun(['started_at' => '2026-10-18 11:59:00'], 'running');
         // Started 25 hours ago: only in the totals.
         $this->ingestionRun(['started_at' => '2026-10-17 11:00:00', 'rows_written' => 10, 'rows_rejected' => 5, 'duration_ms' => 500]);
@@ -78,7 +78,7 @@ class MetricsApiTest extends TestCase
     {
         $other = DataProvider::factory()->create(['slug' => 'other', 'name' => 'Other']);
         $this->ingestionRun(['started_at' => '2026-10-18 10:00:00']);
-        $this->ingestionRun(['started_at' => '2026-10-18 11:00:00', 'rows_written' => 5, 'rows_rejected' => 1, 'duration_ms' => 2000], 'failed');
+        $this->ingestionRun(['started_at' => '2026-10-18 11:00:00', 'rows_rejected' => 1, 'duration_ms' => 2000], 'failed');
         $this->ingestionRun(['data_provider_id' => $other->id, 'started_at' => '2026-10-18 09:00:00', 'rows_written' => 3, 'rows_rejected' => 0, 'duration_ms' => 1000]);
 
         $this->metrics()->assertJsonPath('data.ingestion.last_run_by_provider', [
@@ -125,15 +125,15 @@ class MetricsApiTest extends TestCase
     {
         $store = $this->metricsStore();
         $store->record(200, 10_000);
-        $store->record(422, 4_000);
-        $store->record(500, 31_000);
+        $store->record(422, 4_500);
+        $store->record(500, 31_250);
 
         $this->metrics()->assertJsonPath('data.api', [
             'requests' => 3,
             'errors' => 2,
             'by_status' => ['2xx' => 1, '3xx' => 0, '4xx' => 1, '5xx' => 1],
-            'avg_latency_ms' => 15,
-            'max_latency_ms' => 31,
+            'avg_latency_ms' => 15.25,
+            'max_latency_ms' => 31.25,
         ]);
     }
 
