@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\ProviderStateCast;
 use App\Casts\StatusCast;
 use Database\Factories\DataProviderFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -45,6 +46,7 @@ class DataProvider extends Model
     {
         return [
             'status' => StatusCast::class,
+            'state' => ProviderStateCast::class,
             'is_active' => 'boolean',
         ];
     }

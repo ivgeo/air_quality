@@ -88,7 +88,8 @@ class ProviderStateStoreTest extends TestCase
 
         $store->putCity('sofia', ['seen' => 2, 'list' => [1, 2]]);
 
-        $this->assertSame(
+        // MySQL keeps JSON object keys in its own order, so the keys are compared in any order.
+        $this->assertEquals(
             ['other' => true, 'cities' => ['ruse' => ['seen' => 3], 'sofia' => ['seen' => 2, 'list' => [1, 2]]]],
             $store->get()->toArray(),
         );

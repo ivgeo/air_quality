@@ -6,6 +6,7 @@ use App\Enums\Metric;
 use App\Ingestion\Contracts\AirQualityProvider;
 use App\Ingestion\Data\HourlyReading;
 use App\Ingestion\Data\HourlySeries;
+use App\Ingestion\Data\NoProviderState;
 use App\Ingestion\Exceptions\ProviderException;
 use App\Models\City;
 use Carbon\CarbonImmutable;
@@ -36,6 +37,11 @@ class OpenMeteoProvider implements AirQualityProvider
      * @param  array{url: string, domain: string, timeout: int, connect_timeout: int, retries: int, retry_sleep_ms: int}  $config
      */
     public function __construct(private readonly array $config) {}
+
+    public static function stateClass(): string
+    {
+        return NoProviderState::class;
+    }
 
     public function fetchHourly(City $city, CarbonImmutable $from, CarbonImmutable $to): HourlySeries
     {

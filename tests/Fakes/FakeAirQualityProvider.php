@@ -3,6 +3,7 @@
 namespace Tests\Fakes;
 
 use App\Ingestion\Contracts\AirQualityProvider;
+use App\Ingestion\Contracts\ProviderStateStore;
 use App\Ingestion\Data\HourlySeries;
 use App\Models\City;
 use Carbon\CarbonImmutable;
@@ -10,14 +11,23 @@ use Closure;
 
 /**
  * Provider registered in tests through config only, which also shows that a new provider needs
- * nothing but a class and a config entry. Its `handler` config builds the response (or throws).
+ * nothing but a class and a config entry. Its `handler` config builds the response (or throws);
+ * its state is read as FakeProviderState.
  */
 class FakeAirQualityProvider implements AirQualityProvider
 {
     /**
      * @param  array<string, mixed>  $config
      */
-    public function __construct(public readonly array $config) {}
+    public function __construct(
+        public readonly array $config,
+        public readonly ?ProviderStateStore $state = null,
+    ) {}
+
+    public static function stateClass(): string
+    {
+        return FakeProviderState::class;
+    }
 
     public function fetchHourly(City $city, CarbonImmutable $from, CarbonImmutable $to): HourlySeries
     {
