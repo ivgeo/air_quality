@@ -101,6 +101,35 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # API metrics store only (cache and queue stay on the database); AOF persistence keeps the
+  # counters across restarts. Not published: only the app and phpCacheAdmin reach it.
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+      start_interval: 2s
+    restart: unless-stopped
+
+  # Development-only Redis UI, bound to localhost.
+  phpcacheadmin:
+    image: robinn/phpcacheadmin
+    environment:
+      PCA_REDIS_0_HOST: redis
+    ports:
+      - "127.0.0.1:${PHPCACHEADMIN_PORT:-8090}:80"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   mysql-data:
+  redis-data:
   composer-cache:

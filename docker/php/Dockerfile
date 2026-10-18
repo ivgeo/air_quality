@@ -13,6 +13,11 @@ RUN apt-get update \
     && docker-php-ext-install -j"$(nproc)" pdo_mysql intl zip bcmath pcntl \
     && rm -rf /var/lib/apt/lists/*
 
+# phpredis for the API metrics store (REDIS_CLIENT=phpredis); pinned to a release that builds on PHP 8.5.
+RUN pecl install redis-6.3.0 \
+    && docker-php-ext-enable redis \
+    && rm -rf /tmp/pear
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY docker/php/conf.d/app.ini /usr/local/etc/php/conf.d/zz-app.ini

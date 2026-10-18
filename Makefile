@@ -22,6 +22,7 @@ up: ## Build and start the whole stack (first run bootstraps .env, vendor/, APP_
 	@echo ''
 	@echo 'App:     http://localhost:$(call env_value,APP_PORT,8088)'
 	@echo 'Adminer: http://localhost:$(call env_value,ADMINER_PORT,8089) (local development only)'
+	@echo 'phpCacheAdmin: http://localhost:$(call env_value,PHPCACHEADMIN_PORT,8090) (local development only)'
 
 down: ## Stop and remove the containers (data volumes are kept)
 	$(COMPOSE) down
