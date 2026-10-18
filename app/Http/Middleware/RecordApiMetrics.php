@@ -10,7 +10,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
 /**
- * Logs every API request and counts it in the metrics store (except the untracked routes).
+ * Logs every request under /api, matched by a route or not, and counts it in the metrics store
+ * (except the untracked routes).
  *
  * The work happens in terminate(), after the response has been sent (fastcgi_finish_request), so
  * a slow or unavailable store never delays or breaks a response.
@@ -23,6 +24,10 @@ class RecordApiMetrics
 
     public function handle(Request $request, Closure $next): Response
     {
+        if (! $request->is('api/*')) {
+            return $next($request);
+        }
+
         $startedAt = hrtime(true);
         /** @var Response $response */
         $response = $next($request);

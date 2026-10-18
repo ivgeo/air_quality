@@ -86,6 +86,19 @@ class RecordApiMetricsTest extends TestCase
         Log::shouldHaveReceived('warning')->withArgs(fn (string $message, array $context): bool => $message === 'API metrics not recorded' && isset($context['error']))->once();
     }
 
+    public function test_an_unknown_api_path_is_counted_and_logged_as_a_404(): void
+    {
+        Log::spy();
+
+        $this->getJson('/api/v1/rankings')->assertNotFound();
+
+        $this->assertSame(404, $this->metricsStore()->recorded[0]['status'] ?? null);
+        Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'API request'
+            && $context['path'] === 'api/v1/rankings'
+            && $context['route'] === null
+            && $context['status'] === 404)->once();
+    }
+
     public function test_web_requests_are_not_recorded(): void
     {
         $this->get('/')->assertOk();

@@ -283,8 +283,8 @@ Documented in the [API docs](http://localhost:8088/docs/api). The response (`dat
   `api` is `null` when Redis does not answer (the rest of the response is unaffected, a warning is
   logged).
 
-**API metrics** are recorded by the terminable middleware `RecordApiMetrics` (first in the `api`
-group): it measures the request in the application, then, after the response has been sent, logs
+**API metrics** are recorded by the terminable middleware `RecordApiMetrics` (global and first,
+acting only on `/api/*`, so a 404 for an unknown API path counts too): it measures the request in the application, then, after the response has been sent, logs
 it and adds it to one Redis hash with a single Lua script (atomic, one round trip: count, status
 class, latency sum and an atomic max). The Redis connection `metrics` has 0.5 s timeouts and no
 retries; if Redis is down the request is answered normally, the metric is skipped and

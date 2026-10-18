@@ -21,8 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // First in the group, so the measured duration covers the rest of the API pipeline.
-        $middleware->api(prepend: [RecordApiMetrics::class]);
+        // Global (and first), so it also sees /api requests no route matches (404, 405) and the
+        // measured duration covers the whole pipeline; it only acts on /api paths.
+        $middleware->prepend(RecordApiMetrics::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
