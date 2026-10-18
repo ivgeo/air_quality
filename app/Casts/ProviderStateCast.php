@@ -21,6 +21,12 @@ use LogicException;
 class ProviderStateCast implements CastsAttributes
 {
     /**
+     * Eloquent writes a cached cast object back through set() on every save; without the cache
+     * a read state is never written back, so saving a provider leaves the column alone.
+     */
+    public bool $withoutObjectCaching = true;
+
+    /**
      * @param  array<string, mixed>  $attributes
      */
     public function get(Model $model, string $key, mixed $value, array $attributes): ProviderState

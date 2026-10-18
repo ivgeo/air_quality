@@ -24,14 +24,19 @@ class DatabaseProviderStateStore implements ProviderStateStore
 
     /**
      * One UPDATE, so it is atomic against other cities' writes. The inner JSON_SET makes sure
-     * `$.cities` exists first: JSON_SET does nothing for a path whose parent is missing.
+     * `$.cities` is an object first: JSON_SET does nothing for a path whose parent is missing or
+     * not an object. A state edited by hand into something other than an object starts over.
      */
     public function putCity(string $city, array $value): void
     {
         DB::update(
             "UPDATE `data_provider`
                 SET `state` = JSON_SET(
-                    JSON_SET(`state`, '$.cities', COALESCE(JSON_EXTRACT(`state`, '$.cities'), JSON_OBJECT())),
+                    JSON_SET(
+                        IF(JSON_TYPE(`state`) = 'OBJECT', `state`, JSON_OBJECT()),
+                        '$.cities',
+                        IF(JSON_TYPE(JSON_EXTRACT(`state`, '$.cities')) <=> 'OBJECT', JSON_EXTRACT(`state`, '$.cities'), JSON_OBJECT())
+                    ),
                     ?, CAST(? AS JSON))
               WHERE `slug` = ?",
             ['$.cities.'.json_encode($city), json_encode($value, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION), $this->slug],

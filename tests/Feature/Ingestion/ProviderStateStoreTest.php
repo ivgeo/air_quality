@@ -9,6 +9,7 @@ use App\Models\DataProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use LogicException;
+use PHPUnit\Framework\Attributes\DataProvider as TestWith;
 use Tests\Fakes\FakeAirQualityProvider;
 use Tests\Fakes\FakeProviderState;
 use Tests\TestCase;
@@ -79,6 +80,35 @@ class ProviderStateStoreTest extends TestCase
         $this->expectException(LogicException::class);
 
         $provider->state = new FakeProviderState([]);
+    }
+
+    public function test_a_provider_whose_state_was_read_can_still_be_saved(): void
+    {
+        $provider = DataProvider::factory()->create(['slug' => 'fake']);
+        $provider->refresh()->state;
+
+        $provider->name = 'Renamed';
+        $provider->save();
+
+        $this->assertSame('Renamed', $provider->refresh()->name);
+        $this->assertArrayNotHasKey('state', $provider->getDirty());
+    }
+
+    #[TestWith('nonObjectStates')]
+    public function test_put_city_repairs_a_state_that_is_not_an_object(string $json): void
+    {
+        DataProvider::factory()->create(['slug' => 'fake']);
+        $this->setRawState('fake', $json);
+        $store = new DatabaseProviderStateStore('fake');
+
+        $store->putCity('sofia', ['seen' => 1]);
+
+        $this->assertSame(['seen' => 1], $store->get()->toArray()['cities']['sofia']);
+    }
+
+    public static function nonObjectStates(): array
+    {
+        return ['a list' => ['[1, 2]'], 'a string' => ['"edited"'], 'cities not an object' => ['{"cities": [1]}']];
     }
 
     public function test_put_city_creates_the_cities_object_and_keeps_every_city(): void
