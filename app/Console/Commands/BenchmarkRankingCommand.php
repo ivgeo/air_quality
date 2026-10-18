@@ -15,7 +15,9 @@ use Database\Seeders\QualityMetricSeeder;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Random\Engine\Mt19937;
@@ -52,7 +54,7 @@ class BenchmarkRankingCommand extends Command
      */
     private array $captured = [];
 
-    public function handle(LocalCalendar $calendar, QualityMetricSeeder $metrics, CityRanking $ranking): int
+    public function handle(LocalCalendar $calendar, QualityMetricSeeder $metrics, CityRanking $ranking, Kernel $kernel): int
     {
         try {
             $cities = $this->positiveIntOption('cities');
@@ -92,16 +94,24 @@ class BenchmarkRankingCommand extends Command
             $this->newLine();
             $this->line(sprintf('<options=bold>%s (%s – %s)</>', $label, $period->from->toDateString(), $period->to->toDateString()));
             $sql = $this->measureSql($ranking, $metric, $period, $repeat);
+
+            try {
+                $endpoint = $this->measureEndpoint($kernel, $period, $repeat);
+            } catch (RuntimeException $e) {
+                $this->components->error($e->getMessage());
+
+                return self::FAILURE;
+            }
+
             $summary[] = [
                 $label,
-                ...array_map(fn (float $ms): string => number_format($ms, 2), array_values($sql)),
-                number_format(array_sum($sql), 2),
+                ...array_map(fn (float $ms): string => number_format($ms, 2), [...array_values($sql), array_sum($sql), $endpoint]),
             ];
         }
 
         $this->newLine();
         $this->line(sprintf('Medians of %d run(s) in ms, %s:', $repeat, Metric::Pm25->label()));
-        $this->table(['Period', 'storedPeriods SQL', 'rank SQL', 'SQL total'], $summary);
+        $this->table(['Period', 'storedPeriods SQL', 'rank SQL', 'SQL total', 'Endpoint (in-process)'], $summary);
         $this->components->info(sprintf('The synthetic data stays in %s until the next `make test`.', TestDatabase::NAME));
 
         return self::SUCCESS;
@@ -255,6 +265,41 @@ class BenchmarkRankingCommand extends Command
         }
 
         return array_map($this->median(...), $durations);
+    }
+
+    /**
+     * Sends GET /api/v1/ranking straight to the HTTP kernel (routing, middleware, validation, the
+     * queries and the JSON), once to warm up and then `$repeat` times. terminate() is not called,
+     * so no API metrics or request logs are recorded.
+     *
+     * @return float the median duration in ms
+     *
+     * @throws RuntimeException when a response is not 200
+     */
+    private function measureEndpoint(Kernel $kernel, DateRange $period, int $repeat): float
+    {
+        /** @var list<float> $durations */
+        $durations = [];
+
+        for ($run = 0; $run <= $repeat; $run++) {
+            $request = Request::create('/api/v1/ranking', 'GET', $period->toDateStrings());
+            $request->headers->set('Accept', 'application/json');
+            $startedAt = hrtime(true);
+            $response = $kernel->handle($request);
+            $ms = (hrtime(true) - $startedAt) / 1_000_000;
+
+            if ($response->getStatusCode() !== 200) {
+                throw new RuntimeException(sprintf('GET %s returned %d: %s', $request->getRequestUri(), $response->getStatusCode(), $response->getContent()));
+            }
+
+            if ($run > 0) {
+                $durations[] = $ms;
+            }
+        }
+
+        $this->line(sprintf('Endpoint GET /api/v1/ranking: median %.2f ms', $this->median($durations)));
+
+        return $this->median($durations);
     }
 
     /**

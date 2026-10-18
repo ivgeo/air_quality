@@ -93,9 +93,10 @@ class BenchmarkRankingCommandTest extends TestCase
             ->expectsOutputToContain('30 days (2026-09-20 – 2026-10-19)')
             ->expectsOutputToContain('EXPLAIN ANALYZE storedPeriods')
             ->expectsOutputToContain('EXPLAIN ANALYZE rank')
-            ->expectsOutputToContain('-> ')
-            ->expectsOutputToContain('idx_air_quality_daily_metric_date_city')
-            ->expectsOutputToContain('Endpoint')
+            // One plan line only: a write matched by one expectation does not count for the next,
+            // and the chosen index depends on the statistics of the tiny tables.
+            ->expectsOutputToContain('-> Covering index')
+            ->expectsOutputToContain('Endpoint GET /api/v1/ranking: median')
             ->expectsOutputToContain('182 days: skipped, longer than the 40 generated days')
             ->expectsOutputToContain('1826 days: skipped, longer than the 40 generated days')
             ->assertSuccessful();
