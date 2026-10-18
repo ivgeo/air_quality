@@ -50,6 +50,12 @@ class BenchmarkRankingCommand extends Command
     private ?string $capturing = null;
 
     /**
+     * The query listener cannot be removed, so it is added once per process (Artisan reuses the
+     * command instance, e.g. when a test runs it twice).
+     */
+    private bool $listening = false;
+
+    /**
      * @var list<array{method: string, query: QueryExecuted}>
      */
     private array $captured = [];
@@ -68,14 +74,23 @@ class BenchmarkRankingCommand extends Command
             return self::FAILURE;
         }
 
-        $this->callSilently('migrate', ['--force' => true]);
+        if ($this->callSilently('migrate', ['--force' => true]) !== self::SUCCESS) {
+            $this->components->error(sprintf('Migrating the %s database failed.', TestDatabase::NAME));
+
+            return self::FAILURE;
+        }
+
         $last = $calendar->today();
         $this->generate($metrics, $cities, $days, $last, $seed);
-        DB::listen(function (QueryExecuted $query): void {
-            if ($this->capturing !== null) {
-                $this->captured[] = ['method' => $this->capturing, 'query' => $query];
-            }
-        });
+
+        if (! $this->listening) {
+            DB::listen(function (QueryExecuted $query): void {
+                if ($this->capturing !== null) {
+                    $this->captured[] = ['method' => $this->capturing, 'query' => $query];
+                }
+            });
+            $this->listening = true;
+        }
 
         $metric = QualityMetric::query()->where('slug', Metric::Pm25->value)->firstOrFail();
         /** @var list<list<string>> $summary */
@@ -212,7 +227,10 @@ class BenchmarkRankingCommand extends Command
 
         // Fresh index statistics, as a long-running database has: right after a bulk insert they
         // are stale and the optimizer can miss the loose index scan of the stored periods.
-        DB::statement('ANALYZE TABLE air_quality_daily, city');
+        // ANALYZE TABLE commits implicitly, so it is skipped inside a transaction (a test's).
+        if (DB::transactionLevel() === 0) {
+            DB::statement('ANALYZE TABLE air_quality_daily, city');
+        }
 
         $this->components->info(sprintf(
             'Generated %d cities × %d days × %d metrics = %d daily rows (seed %d), %s – %s.',

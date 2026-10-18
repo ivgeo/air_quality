@@ -9,6 +9,7 @@ use App\Models\City;
 use App\Models\IngestionRun;
 use App\Models\QualityMetric;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
@@ -100,6 +101,15 @@ class BenchmarkRankingCommandTest extends TestCase
             ->expectsOutputToContain('182 days: skipped, longer than the 40 generated days')
             ->expectsOutputToContain('1826 days: skipped, longer than the 40 generated days')
             ->assertSuccessful();
+    }
+
+    public function test_a_second_run_in_the_same_process_captures_each_query_once(): void
+    {
+        Artisan::call('air-quality:benchmark', self::SMALL);
+        Artisan::call('air-quality:benchmark', self::SMALL);
+
+        // Two measured periods (1 and 30 days), one storedPeriods query each.
+        $this->assertSame(2, substr_count(Artisan::output(), 'EXPLAIN ANALYZE storedPeriods'));
     }
 
     public function test_the_in_process_requests_record_no_api_metrics(): void
