@@ -18,9 +18,41 @@ class ProviderRegistry
     ) {}
 
     /**
+     * Build the provider with its config entry and a store for its `data_provider.state`.
+     *
      * @throws ProviderNotConfiguredException
      */
     public function for(string $slug): AirQualityProvider
+    {
+        return $this->container->make($this->classFor($slug), [
+            'config' => $this->entry($slug),
+            'state' => new DatabaseProviderStateStore($slug),
+        ]);
+    }
+
+    /**
+     * @return class-string<AirQualityProvider>
+     *
+     * @throws ProviderNotConfiguredException
+     */
+    public function classFor(string $slug): string
+    {
+        /** @var mixed $class */
+        $class = $this->entry($slug)['class'] ?? null;
+
+        if (! is_string($class) || ! is_subclass_of($class, AirQualityProvider::class)) {
+            throw ProviderNotConfiguredException::invalidClass($slug, $class);
+        }
+
+        return $class;
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws ProviderNotConfiguredException
+     */
+    private function entry(string $slug): array
     {
         /** @var mixed $entry */
         $entry = $this->config->get('air_quality.providers')[$slug] ?? null;
@@ -29,13 +61,6 @@ class ProviderRegistry
             throw ProviderNotConfiguredException::missing($slug);
         }
 
-        /** @var mixed $class */
-        $class = $entry['class'] ?? null;
-
-        if (! is_string($class) || ! is_subclass_of($class, AirQualityProvider::class)) {
-            throw ProviderNotConfiguredException::invalidClass($slug, $class);
-        }
-
-        return $this->container->make($class, ['config' => $entry]);
+        return $entry;
     }
 }

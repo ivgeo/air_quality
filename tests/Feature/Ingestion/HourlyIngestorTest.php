@@ -239,6 +239,22 @@ class HourlyIngestorTest extends TestCase
         Log::shouldNotHaveReceived('error');
     }
 
+    public function test_an_active_openaq_without_an_api_key_fails_the_run_and_keeps_the_rows(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => null]);
+        $provider = DataProvider::factory()->create(['slug' => 'openaq']);
+        $this->storeHour('2026-10-17 10:00', 1.0, provider: $provider);
+        Log::spy();
+
+        $run = app(HourlyIngestor::class)->ingest($provider, $this->city, IngestionType::Scheduled, CarbonImmutable::now()->subDay(), CarbonImmutable::now())->refresh();
+
+        $this->assertSame(IngestionOutcome::Failed, $run->outcome);
+        $this->assertStringContainsString('api_key', $run->error);
+        $this->assertStringContainsString('OPENAQ_API_KEY', $run->error);
+        $this->assertSame(1, AirQualityHourly::where('data_provider_id', $provider->id)->count());
+        Log::shouldHaveReceived('warning')->once();
+    }
+
     /**
      * @param  array<string, mixed>  $context
      */

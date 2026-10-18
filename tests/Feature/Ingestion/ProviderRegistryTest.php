@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Ingestion;
 
+use App\Ingestion\DatabaseProviderStateStore;
 use App\Ingestion\Exceptions\ProviderNotConfiguredException;
 use App\Ingestion\ProviderRegistry;
+use App\Ingestion\Providers\OpenAq\OpenAqProvider;
 use App\Ingestion\Providers\OpenMeteoProvider;
 use PHPUnit\Framework\Attributes\DataProvider;
 use stdClass;
@@ -17,6 +19,23 @@ class ProviderRegistryTest extends TestCase
         $this->assertInstanceOf(OpenMeteoProvider::class, app(ProviderRegistry::class)->for('open-meteo'));
     }
 
+    public function test_the_openaq_provider_is_built_with_a_key(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => 'test-key']);
+
+        $this->assertInstanceOf(OpenAqProvider::class, app(ProviderRegistry::class)->for('openaq'));
+    }
+
+    public function test_the_openaq_provider_without_a_key_is_not_configured(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => null]);
+
+        $this->expectException(ProviderNotConfiguredException::class);
+        $this->expectExceptionMessage('api_key');
+
+        app(ProviderRegistry::class)->for('openaq');
+    }
+
     public function test_a_configured_slug_builds_its_class_with_the_config_entry(): void
     {
         config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class, 'url' => 'https://fake.test']]);
@@ -25,6 +44,28 @@ class ProviderRegistryTest extends TestCase
 
         $this->assertInstanceOf(FakeAirQualityProvider::class, $provider);
         $this->assertSame('https://fake.test', $provider->config['url']);
+    }
+
+    public function test_the_provider_receives_a_state_store_for_its_slug(): void
+    {
+        config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class]]);
+
+        $provider = app(ProviderRegistry::class)->for('fake');
+
+        $this->assertInstanceOf(DatabaseProviderStateStore::class, $provider->state);
+        $this->assertSame('fake', $provider->state->slug);
+    }
+
+    public function test_class_for_names_the_configured_class_without_building_it(): void
+    {
+        $this->assertSame(OpenMeteoProvider::class, app(ProviderRegistry::class)->classFor('open-meteo'));
+    }
+
+    public function test_class_for_an_unknown_slug_is_not_configured(): void
+    {
+        $this->expectException(ProviderNotConfiguredException::class);
+
+        app(ProviderRegistry::class)->classFor('unknown');
     }
 
     public function test_a_slug_without_config_is_not_configured(): void

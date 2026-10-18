@@ -9,7 +9,8 @@ use Carbon\CarbonImmutable;
 
 /**
  * A source of hourly air quality data. Implementations are registered by slug in
- * config/air_quality.php and receive that config entry as the `config` constructor argument.
+ * config/air_quality.php and receive that config entry as the `config` constructor argument; one
+ * that keeps state (see stateClass()) also takes a ProviderStateStore as the `state` argument.
  *
  * A provider only translates its own API: it maps its metric keys to App\Enums\Metric values and
  * checks the response structure. Value rules (missing, negative, future hours) are applied by
@@ -24,4 +25,11 @@ interface AirQualityProvider
      *                           a response of an unexpected shape
      */
     public function fetchHourly(City $city, CarbonImmutable $from, CarbonImmutable $to): HourlySeries;
+
+    /**
+     * The class `data_provider.state` is read as; App\Ingestion\Data\NoProviderState for none.
+     *
+     * @return class-string<ProviderState>
+     */
+    public static function stateClass(): string;
 }

@@ -62,6 +62,32 @@ class IngestHourlyDataJobTest extends TestCase
         $this->assertNotSame($scheduled->uniqueId(), $backfill->uniqueId());
     }
 
+    public function test_the_timeout_comes_from_the_providers_job_timeout(): void
+    {
+        config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class, 'job_timeout' => 300]]);
+
+        $job = $this->job(IngestionType::Backfill);
+
+        $this->assertSame(300, $job->timeout);
+        $this->assertSame(600, $job->middleware()[0]->expiresAfter);
+    }
+
+    public function test_the_timeout_defaults_to_80_seconds(): void
+    {
+        config(['air_quality.providers.fake' => ['class' => FakeAirQualityProvider::class]]);
+
+        $this->assertSame(80, $this->job(IngestionType::Scheduled)->timeout);
+    }
+
+    public function test_every_job_timeout_stays_below_the_queues_retry_after(): void
+    {
+        $retryAfter = config('queue.connections.database.retry_after');
+
+        foreach (config('air_quality.providers') as $slug => $entry) {
+            $this->assertLessThan($retryAfter, $entry['job_timeout'] ?? IngestHourlyData::DEFAULT_TIMEOUT, "{$slug} job_timeout");
+        }
+    }
+
     public function test_a_successful_run_queues_the_aggregation_of_its_period(): void
     {
         Queue::fake([AggregateDailyData::class]);

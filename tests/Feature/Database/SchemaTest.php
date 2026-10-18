@@ -131,6 +131,16 @@ class SchemaTest extends TestCase
         ];
     }
 
+    public function test_provider_state_is_a_json_object_that_defaults_to_empty(): void
+    {
+        /** @var array{nullable: bool, type_name: string} $column */
+        $column = Arr::first(Schema::getColumns('data_provider'), fn (array $column): bool => $column['name'] === 'state');
+
+        $this->assertSame('json', $column['type_name']);
+        $this->assertFalse($column['nullable']);
+        $this->assertSame('{}', DB::table('data_provider')->where('id', $this->insertProvider('a'))->value('state'));
+    }
+
     public function test_hourly_rejects_a_second_row_for_the_same_city_provider_and_hour(): void
     {
         $row = ['city_id' => $this->insertCity(), 'data_provider_id' => $this->insertProvider('a'), 'measure_at' => '2026-10-01 10:00:00', 'data' => '{}'];
