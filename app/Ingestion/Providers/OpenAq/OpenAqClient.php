@@ -5,6 +5,7 @@ namespace App\Ingestion\Providers\OpenAq;
 use App\Ingestion\Exceptions\ProviderException;
 use App\Ingestion\Exceptions\ProviderNotConfiguredException;
 use Carbon\CarbonImmutable;
+use Carbon\Exceptions\InvalidFormatException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -110,6 +111,19 @@ class OpenAqClient
             }
 
             $this->wait($reset ?? self::SERVER_ERROR_SLEEP_SECONDS, "HTTP {$response->status()}");
+        }
+    }
+
+    /**
+     * A time as the API writes it ("2026-10-18T10:00:00Z", ISO 8601 with an offset), or null
+     * for anything else, relative strings included.
+     */
+    public static function parseTime(string $value): ?CarbonImmutable
+    {
+        try {
+            return CarbonImmutable::createFromFormat('Y-m-d\TH:i:sP', $value)?->utc();
+        } catch (InvalidFormatException) {
+            return null;
         }
     }
 
