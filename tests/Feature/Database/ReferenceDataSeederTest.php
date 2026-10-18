@@ -35,11 +35,43 @@ class ReferenceDataSeederTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $provider = DataProvider::sole();
+        $provider = DataProvider::where('slug', 'open-meteo')->sole();
 
         $this->assertSame('open-meteo', $provider->slug);
         $this->assertSame('Open-Meteo', $provider->name);
         $this->assertTrue($provider->is_active);
+    }
+
+    public function test_it_seeds_openaq_as_active_when_its_api_key_is_set(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => 'test-key']);
+
+        $this->seed(DatabaseSeeder::class);
+
+        $provider = DataProvider::where('slug', 'openaq')->sole();
+        $this->assertSame('OpenAQ', $provider->name);
+        $this->assertTrue($provider->is_active);
+    }
+
+    public function test_it_seeds_openaq_as_inactive_without_an_api_key(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => null]);
+
+        $this->seed(DatabaseSeeder::class);
+
+        $this->assertFalse(DataProvider::where('slug', 'openaq')->sole()->is_active);
+        $this->assertTrue(DataProvider::where('slug', 'open-meteo')->sole()->is_active);
+    }
+
+    public function test_a_key_added_later_does_not_activate_openaq(): void
+    {
+        config(['air_quality.providers.openaq.api_key' => '']);
+        $this->seed(DatabaseSeeder::class);
+
+        config(['air_quality.providers.openaq.api_key' => 'test-key']);
+        $this->seed(DatabaseSeeder::class);
+
+        $this->assertFalse(DataProvider::where('slug', 'openaq')->sole()->is_active);
     }
 
     public function test_every_metric_case_has_an_active_nomenclature_row(): void
@@ -65,7 +97,7 @@ class ReferenceDataSeederTest extends TestCase
         $this->seed(DatabaseSeeder::class);
 
         $this->assertSame(5, City::count());
-        $this->assertSame(1, DataProvider::count());
+        $this->assertSame(2, DataProvider::count());
         $this->assertSame(count(Metric::cases()), QualityMetric::count());
     }
 
@@ -73,7 +105,7 @@ class ReferenceDataSeederTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        foreach ([City::where('slug', 'varna')->sole(), DataProvider::sole(), QualityMetric::where('slug', Metric::Pm10->value)->sole()] as $model) {
+        foreach ([City::where('slug', 'varna')->sole(), DataProvider::where('slug', 'open-meteo')->sole(), QualityMetric::where('slug', Metric::Pm10->value)->sole()] as $model) {
             $model->status = $model->status->without(Status::Active);
             $model->save();
         }
@@ -82,7 +114,7 @@ class ReferenceDataSeederTest extends TestCase
 
         $this->assertFalse(City::where('slug', 'varna')->sole()->is_active);
         $this->assertTrue(City::where('slug', 'sofia')->sole()->is_active);
-        $this->assertFalse(DataProvider::sole()->is_active);
+        $this->assertFalse(DataProvider::where('slug', 'open-meteo')->sole()->is_active);
         $this->assertFalse(QualityMetric::where('slug', Metric::Pm10->value)->sole()->is_active);
     }
 
