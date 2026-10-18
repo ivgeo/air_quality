@@ -192,6 +192,7 @@ class DailyAggregatorTest extends TestCase
         Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation started' && $matches($context))->once();
         Log::shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'Daily aggregation finished'
             && $matches($context)
+            && $context['outcome'] === 'success'
             && $context['days'] === 3
             && $context['rows_written'] === 3
             && $context['duration_ms'] >= 0)->once();

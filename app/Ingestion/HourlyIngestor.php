@@ -68,19 +68,23 @@ class HourlyIngestor
 
             $this->store($provider, $city, $series);
         } catch (ProviderNotConfiguredException $e) {
-            Log::warning('Ingestion run skipped: provider is not configured', [...$context, 'error' => $e->getMessage()]);
+            Log::warning('Ingestion run skipped: provider is not configured', [...$this->finalContext($context, IngestionOutcome::Failed, $startedAt), 'error' => $e->getMessage()]);
 
             return $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
         } catch (ProviderException $e) {
-            Log::error('Ingestion run failed', [...$context, 'error' => $e->getMessage()]);
+            $rejected = $series?->rejected ?? 0;
+            Log::error('Ingestion run failed', [...$this->finalContext($context, IngestionOutcome::Failed, $startedAt, rejected: $rejected), 'error' => $e->getMessage()]);
 
-            return $this->finish($run, $startedAt, IngestionOutcome::Failed, rejected: $series?->rejected ?? 0, error: $e->getMessage());
+            return $this->finish($run, $startedAt, IngestionOutcome::Failed, rejected: $rejected, error: $e->getMessage());
         } catch (Throwable $e) {
             // Unexpected (e.g. database) errors are journaled too, then left to the queue to report.
-            Log::error('Ingestion run failed unexpectedly', [...$context, 'error' => $e->getMessage()]);
+            Log::error('Ingestion run failed unexpectedly', [
+                ...$this->finalContext($context, IngestionOutcome::Failed, $startedAt, rejected: $series?->rejected ?? 0),
+                'error' => $e->getMessage(),
+            ]);
 
             try {
-                $this->finish($run, $startedAt, IngestionOutcome::Failed, error: $e->getMessage());
+                $this->finish($run, $startedAt, IngestionOutcome::Failed, rejected: $series?->rejected ?? 0, error: $e->getMessage());
             } catch (Throwable) {
                 // The database itself may be the problem; the original error matters more.
             }
@@ -90,7 +94,7 @@ class HourlyIngestor
 
         $run = $this->finish($run, $startedAt, IngestionOutcome::Success, count($series->hours), $series->rejected);
 
-        Log::info('Ingestion run finished', [...$context, 'written' => $run->rows_written, 'rejected' => $run->rows_rejected, 'duration_ms' => $run->duration_ms]);
+        Log::info('Ingestion run finished', $this->finalContext($context, IngestionOutcome::Success, $startedAt, $run->rows_written, $run->rows_rejected));
 
         return $run;
     }
@@ -132,9 +136,32 @@ class HourlyIngestor
             'rows_rejected' => $rejected,
             'error' => $error,
             'finished_at' => CarbonImmutable::now(),
-            'duration_ms' => intdiv(hrtime(true) - $startedAt, 1_000_000),
+            'duration_ms' => $this->elapsedMs($startedAt),
         ]);
 
         return $run;
+    }
+
+    /**
+     * The context of the log line that ends a run, the same for every outcome. A failure is logged
+     * before the run is journaled, so the line survives a database that is failing too.
+     *
+     * @param  array<string, string>  $context
+     * @return array<string, string|int>
+     */
+    private function finalContext(array $context, IngestionOutcome $outcome, int $startedAt, int $written = 0, int $rejected = 0): array
+    {
+        return [
+            ...$context,
+            'outcome' => $outcome->value,
+            'rows_written' => $written,
+            'rows_rejected' => $rejected,
+            'duration_ms' => $this->elapsedMs($startedAt),
+        ];
+    }
+
+    private function elapsedMs(int $startedAt): int
+    {
+        return intdiv(hrtime(true) - $startedAt, 1_000_000);
     }
 }

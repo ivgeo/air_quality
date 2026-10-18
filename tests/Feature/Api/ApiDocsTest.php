@@ -39,4 +39,17 @@ class ApiDocsTest extends TestCase
             array_keys($spec['components']['schemas']['RankingEntryResource']['properties']),
         );
     }
+
+    public function test_the_spec_describes_the_metrics_endpoint(): void
+    {
+        $spec = $this->getJson('/docs/api.json')->assertOk()->json();
+
+        $operation = $spec['paths']['/v1/metrics']['get'] ?? null;
+        $this->assertIsArray($operation);
+
+        $body = $operation['responses']['200']['content']['application/json']['schema'];
+        $data = $body['properties']['data'] ?? $spec['components']['schemas']['MetricsResource'];
+        $data = isset($data['$ref']) ? $spec['components']['schemas'][basename($data['$ref'])] : $data;
+        $this->assertSame(['generated_at', 'ingestion', 'api'], array_keys($data['properties']));
+    }
 }

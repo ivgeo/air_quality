@@ -38,6 +38,11 @@
     --danger: #B42318;
     --danger-bg: #FDECEA;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    /* Chart marks (checked with the dataviz palette validator against --surface). */
+    --chart-good: #21A07B;
+    --chart-warn: #DCA730;
+    --chart-bad: #B42318;
+    --chart-neutral: #8A9A9D;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -60,6 +65,10 @@
         --danger: #FF8A80;
         --danger-bg: #3A1614;
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        --chart-good: #2FA886;
+        --chart-warn: #AE8A1E;
+        --chart-bad: #D9363F;
+        --chart-neutral: #5E7474;
     }
 }
 
@@ -82,6 +91,10 @@
     --danger: #FF8A80;
     --danger-bg: #3A1614;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --chart-good: #2FA886;
+    --chart-warn: #AE8A1E;
+    --chart-bad: #D9363F;
+    --chart-neutral: #5E7474;
 }
 
 *,
@@ -186,6 +199,10 @@ button {
 .topbar__nav a:hover {
     color: var(--accent);
     background: var(--soft);
+}
+
+.topbar__nav a[aria-current="page"] {
+    color: var(--accent);
 }
 
 .icon-button {
@@ -650,6 +667,323 @@ th[aria-sort="descending"] .sort::after {
     color: var(--muted);
 }
 
+/* Metrics page */
+
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.toolbar__updated {
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.button--quiet {
+    margin-top: 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+}
+
+.button--quiet:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.metrics > * {
+    transition: opacity 0.2s;
+}
+
+/* Values from an earlier load while the current one failed: never let them look current. */
+.is-stale {
+    opacity: 0.45;
+    filter: grayscale(1);
+}
+
+.metrics h2 {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 22px;
+    letter-spacing: -0.02em;
+}
+
+.metrics h3 {
+    margin: 8px 0 0;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.metrics__section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.health {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.health__head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.health__checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 32px;
+    margin: 0;
+}
+
+.health__checks div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.health__checks dt {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.health__checks dd {
+    margin: 0;
+    font-weight: 600;
+}
+
+.freshness {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--line);
+    list-style: none;
+}
+
+.freshness__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+}
+
+.freshness__name {
+    font-weight: 700;
+}
+
+.freshness__when,
+.freshness__empty {
+    font-size: 14px;
+    color: var(--muted);
+}
+
+/* A status always carries its label; the dot repeats it in colour. */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: var(--soft);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.badge--good {
+    background: var(--good-bg);
+    color: var(--good-ink);
+}
+
+.badge--warn {
+    background: var(--mod-bg);
+    color: var(--mod-ink);
+}
+
+.badge--bad {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+    gap: 12px;
+}
+
+.chart {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 0;
+}
+
+.chart__title {
+    font-weight: 700;
+}
+
+.chart__row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.chart__row svg {
+    display: block;
+}
+
+.chart__label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+}
+
+.chart__track {
+    fill: var(--soft);
+}
+
+.chart__segment {
+    outline: none;
+}
+
+.chart__segment:hover,
+.chart__segment:focus-visible {
+    opacity: 0.8;
+}
+
+.chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.chart__legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.chart__legend strong {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+.chart__swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+}
+
+.chart__empty {
+    margin: 0;
+    color: var(--muted);
+}
+
+.tooltip {
+    position: absolute;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+.tooltip span {
+    color: var(--muted);
+}
+
+.data-table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+}
+
+.data-table th {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-table .strong {
+    font-weight: 700;
+}
+
+.data-table .nowrap {
+    white-space: nowrap;
+}
+
+.data-table td small {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.data-table .error {
+    color: var(--danger);
+    overflow-wrap: anywhere;
+}
+
+.data-table .empty {
+    color: var(--muted);
+}
+
+.footnote a {
+    color: var(--accent);
+}
+
 @media (max-width: 640px) {
     .container {
         padding-left: 16px;
@@ -661,7 +995,7 @@ th[aria-sort="descending"] .sort::after {
     }
 
     .topbar__nav a {
-        padding: 11px 10px;
+        padding: 11px 8px;
     }
 
     .page {
@@ -680,5 +1014,17 @@ th[aria-sort="descending"] .sort::after {
     .button {
         margin-top: 0;
         width: 100%;
+    }
+
+    .button--quiet {
+        width: auto;
+    }
+}
+
+/* Two nav links and the full brand do not fit on one row on a phone: keep the logo only (the
+   link keeps its name through aria-label). */
+@media (max-width: 440px) {
+    .brand span {
+        display: none;
     }
 }

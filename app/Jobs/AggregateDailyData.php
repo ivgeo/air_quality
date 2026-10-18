@@ -78,6 +78,7 @@ class AggregateDailyData implements ShouldQueue
             'city' => $this->city->slug,
             'from' => $this->from->toDateTimeString(),
             'to' => $this->to->toDateTimeString(),
+            'outcome' => 'failed',
             'error' => $e->getMessage(),
         ]);
     }

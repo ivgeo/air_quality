@@ -28,7 +28,9 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 |---------|-----------------------|-------------------------------------------------------------|
 | App     | http://localhost:8088 | The ranking page, see [Web UI](#web-ui); `/up` is the framework health route |
 | API docs | http://localhost:8088/docs/api | OpenAPI 3.1, see [API](#api)                     |
+| Metrics | http://localhost:8088/metrics | Health and metrics page, see [Observability](#observability); JSON at `/health` and `/api/v1/metrics` |
 | Adminer | http://localhost:8089 | Local development only. Log in with server `mysql` and the `DB_USERNAME` / `DB_PASSWORD` from `.env` |
+| phpCacheAdmin | http://localhost:8090 | Local development only. Redis UI (the API metrics counters) |
 | MySQL   | `127.0.0.1:33060`     | For an IDE / database client (same credentials)             |
 
 ## Stack
@@ -40,7 +42,12 @@ migrations. It returns once every service is healthy, and it is safe to run agai
 | `queue`     | same image                    | `php artisan queue:work` (ingestion and aggregation jobs) |
 | `nginx`     | `nginx:1.30-alpine`           | HTTP entry point                                        |
 | `mysql`     | `mysql:8.4` (LTS)             | Development database `air_quality` and test database `air_quality_test` |
+| `redis`     | `redis:8-alpine` (AOF persistence) | API metrics counters only; not published on the host |
 | `adminer`   | `adminer:6`                   | Database UI, bound to localhost (not for production)    |
+| `phpcacheadmin` | `robinn/phpcacheadmin`    | Redis UI, bound to localhost (not for production)       |
+
+The PHP image includes the `phpredis` extension (PECL, pinned). Cache, sessions and the queue stay
+on the database; Redis holds nothing but the API metrics.
 
 The PHP image is built with your host UID/GID (passed by the Makefile), so files created by the
 containers in the project directory stay owned by you.
@@ -220,6 +227,115 @@ and no partial result:
 | Unknown or inactive metric                               | `metric`         |
 | No data collected yet for the metric (e.g. before the first backfill) | `metric` |
 
+## Observability
+
+Three read-only views of the application and its data collection. None of them calls the data
+provider; they read the database, the `ingestion_runs` journal and Redis.
+
+### `GET /health`
+
+```json
+{
+  "status": "ok",
+  "checked_at": "2026-10-18T12:00:00+00:00",
+  "checks": {
+    "database": { "status": "ok" },
+    "freshness": {
+      "threshold_hours": 3,
+      "providers": [
+        { "provider": "open-meteo", "name": "Open-Meteo", "status": "ok", "last_success_at": "2026-10-18T11:00:12+00:00" }
+      ]
+    },
+    "metrics_store": { "status": "ok" }
+  }
+}
+```
+
+| `status`   | HTTP | When |
+|------------|------|------|
+| `ok`       | 200  | The database answers and every active provider has a successful run within the threshold |
+| `degraded` | 200  | The database answers, but an active provider (`stale`) has no successful run within the threshold; the stored data is still served, and the response says which provider and since when (`last_success_at`, `null` if it never succeeded) |
+| `down`     | 503  | The database does not answer (`freshness` is then `null`) |
+
+- **Freshness** is judged per active provider (`data_provider.is_active`) as a whole: its latest
+  successful run for any city. One city without a recent run does not degrade the status. The
+  threshold is `air_quality.health.freshness_hours` (3, the scheduler runs hourly).
+- **Metrics store** (`ok` / `unavailable`) is informative only: the API works without Redis, so it
+  never changes the status.
+- `/health` is outside the `web` middleware group (no session), so it still answers 503 when the
+  database is down. With the `mysql` container *stopped* (`docker compose stop mysql`) that takes
+  several seconds in this setup, because resolving the missing container name fails slowly; a
+  database server that refuses connections is reported at once. Laravel's `/up` stays as the cheap liveness probe of the Docker healthcheck.
+
+### `GET /api/v1/metrics`
+
+Documented in the [API docs](http://localhost:8088/docs/api). The response (`data`):
+
+- `ingestion.total` and `ingestion.last_24h` (runs started in the last 24 hours): runs per outcome
+  (`success`, `failed`, `running`), `rows_written`, `rows_rejected` and `avg_duration_ms` (finished
+  runs only, `null` when there is none);
+- `ingestion.last_run_by_provider`: the newest run of each provider (city, outcome, times, rows);
+- `ingestion.recent_failures`: the 5 newest failed runs (`air_quality.metrics.recent_failures`)
+  with provider, city, time and error;
+- `api`: `requests`, `errors` (4xx + 5xx), `by_status` (`2xx` … `5xx`), `avg_latency_ms` and
+  `max_latency_ms` of every request under `/api` since the counters started, **except this
+  endpoint** (the Metrics page polls it every 30 s and would skew the numbers; it is still logged).
+  `api` is `null` when Redis does not answer (the rest of the response is unaffected, a warning is
+  logged).
+
+**API metrics** are recorded by the terminable middleware `RecordApiMetrics` (global and first,
+acting only on `/api/*`, so a 404 for an unknown API path counts too): it measures the request in the application, then, after the response has been sent, logs
+it and adds it to one Redis hash with a single Lua script (atomic, one round trip: count, status
+class, latency sum and an atomic max). The Redis connection `metrics` has 0.5 s timeouts and no
+retries; if Redis is down the request is answered normally, the metric is skipped and
+`API metrics not recorded` is logged. A circuit breaker (`CircuitBreakingApiMetricsStore`) then
+leaves Redis alone for 30 s (`air_quality.metrics.retry_after_seconds`, a marker file in
+`storage/framework/cache`): every metrics call fails at once and `/health` reports `unavailable`
+immediately. Without it, a *stopped* Redis container costs ≈3 s per call (the failing DNS lookup of
+its name, which the 0.5 s timeouts do not cover) and would keep a PHP worker busy that long after
+every API request. The counters survive restarts (AOF on the `redis-data`
+volume). Only totals, a sum and a maximum are kept: no percentiles or time series.
+
+**Measured** on the test database with 200 000 synthetic runs (≈4.5 years at the scheduled rate,
+2 providers, 5 cities), MySQL 8.4 in Docker on WSL2: the endpoint took ≈255 ms with table scans for
+every part. A migration adds three indexes on `ingestion_runs`; with them `last_24h` (0.5 ms), the
+last run per provider (0.3 ms, a skip scan for `MAX(id)` per provider) and the newest failures
+(0.2 ms) read only what they return, and `total` is one covering index scan grouped by outcome
+(≈35 ms). The whole endpoint: median 39 ms over 10 requests. `total` still grows linearly with the
+journal (≈44 000 runs a year at 5 cities); a rollup table would make it constant if the history
+gets much longer.
+
+### Metrics page
+
+http://localhost:8088/metrics (the **Metrics** link in the header, next to API docs) is a thin
+client of the two endpoints above, in the same design and themes as the ranking page:
+
+- a health band: overall status, database, Redis, and the freshness of each provider (last
+  successful run, "… ago", against the threshold);
+- cards: runs and rows for the last 24 hours and in total, average run duration, API requests,
+  errors and latency;
+- charts (inline SVG, colours from the theme's CSS variables, values listed under every bar):
+  runs by outcome and rows written / rejected (last 24 hours and all time), API responses by
+  status class;
+- tables: the last run of each provider and the newest failures with their error;
+- derived values computed in the browser: success rate, rejected share, rows per successful run,
+  API error rate.
+
+It refreshes every 30 seconds and with the Refresh button, and shows when it last updated. When
+the database is down or an endpoint fails, it says so and dims the values left from the previous
+update, so they do not look current. Like `/health`, the page is outside the `web` group, so it
+loads without the database.
+
+### Logs
+
+Every log line goes to `storage/logs/laravel.log` (plain text) and to stderr as **one JSON object
+per line** (`LOG_STDERR_FORMATTER`, Monolog `JsonFormatter` by default), which is what
+`make logs ARGS="app queue"` shows. The lines that end an ingestion run (`Ingestion run finished`,
+`Ingestion run failed`, …) always carry `provider, city, type, from, to, outcome, rows_written,
+rows_rejected, duration_ms` (plus `error` on failure); `Daily aggregation finished` carries
+`city, from, to, outcome, days, rows_written, duration_ms`. Every API request is logged as
+`API request` with `method, path, route, status, duration_ms`.
+
 ## Make targets
 
 Run `make` (or `make help`) to list them. Extra arguments go through `ARGS="..."`.
@@ -261,14 +377,20 @@ taken, change it there and run `make up` again:
 |-------------------|---------|-------------------------|
 | `APP_PORT`        | `8088`  | App (nginx)             |
 | `ADMINER_PORT`    | `8089`  | Adminer                 |
+| `PHPCACHEADMIN_PORT` | `8090` | phpCacheAdmin          |
 | `FORWARD_DB_PORT` | `33060` | MySQL on the host       |
 | `OPEN_METEO_URL`  | `https://air-quality-api.open-meteo.com` | Open-Meteo API base URL |
 | `OPEN_METEO_TIMEOUT` | `15` | Open-Meteo request timeout (seconds) |
+| `REDIS_HOST`      | `redis` | Redis host (the Compose service) |
+| `REDIS_METRICS_DB` | `0`    | Redis database of the API metrics (tests use 15) |
 
-If you change `APP_PORT`, update `APP_URL` too. The database credentials in `.env.example` are for
+If you change `APP_PORT`, update `APP_URL` too. A `.env` created before Redis was added still has
+`REDIS_HOST=127.0.0.1`: set it to `redis` (and add `REDIS_METRICS_DB=0`, `PHPCACHEADMIN_PORT=8090`),
+otherwise the API keeps working but its metrics are not recorded. The database credentials in `.env.example` are for
 local development only.
 MySQL applies `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` and `DB_ROOT_PASSWORD` only when it
 initialises an empty data volume, so changing them later also requires recreating the volume (see
 [Tests](#tests)).
 
-Laravel logs go to `storage/logs/laravel.log` and to stderr, so they also show up in `make logs`.
+Laravel logs go to `storage/logs/laravel.log` and to stderr (as JSON lines), so they also show up
+in `make logs`; see [Logs](#logs).
